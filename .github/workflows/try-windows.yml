@@ -1,0 +1,80 @@
+# Temporary: checks scripts/try-locally.ps1 on a clean Windows machine. Not part of any PR.
+name: try-locally on Windows
+
+on:
+  push:
+    branches: [test/windows-try]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fresh PHP 8.3 zip (no php.ini) and no Composer on PATH, like a new winget install
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -UseBasicParsing https://windows.php.net/downloads/releases/latest/php-8.3-nts-Win32-vs16-x64-latest.zip -OutFile php.zip
+          Expand-Archive php.zip C:\freshphp
+          $dirs = $env:Path -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'php.exe')) -and -not (Test-Path (Join-Path $_ 'composer.bat')) -and -not (Test-Path (Join-Path $_ 'composer')) }
+          (@('C:\freshphp') + $dirs) -join ';' | Set-Content $env:RUNNER_TEMP\path.txt
+          Test-Path C:\freshphp\php.ini
+      - name: Run the script, then check pages, login and images
+        shell: pwsh
+        run: |
+          $env:Path = Get-Content $env:RUNNER_TEMP\path.txt
+          (Get-Command php).Source
+          php -m
+          Get-Command composer -ErrorAction SilentlyContinue
+          function Start-Try($n) {
+            $exe = if ('${{ matrix.shell }}' -eq 'pwsh') { 'pwsh' } else { 'powershell' }
+            Start-Process $exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','scripts\try-locally.ps1' -PassThru -NoNewWindow -RedirectStandardOutput "run$n.log" -RedirectStandardError "run$n.err"
+          }
+          function Wait-Up {
+            for ($i = 0; $i -lt 300; $i++) {
+              try { if ((Invoke-WebRequest -UseBasicParsing http://localhost:5173/api/config -TimeoutSec 5).StatusCode -eq 200) { return $true } } catch {}
+              Start-Sleep 2
+            }
+            return $false
+          }
+          $p = Start-Try 1
+          $up = Wait-Up
+          Get-Content run1.log; Get-Content run1.err
+          if (-not $up) { throw 'servers did not come up' }
+          $page = Invoke-WebRequest -UseBasicParsing http://localhost:5173/
+          if ($page.Content -notmatch '<div id="root">') { throw 'home page missing root' }
+          $products = Invoke-RestMethod http://localhost:5173/api/products
+          "products: $($products.data.Count)"
+          if ($products.data.Count -lt 1) { throw 'no products' }
+          $img = $products.data[0].image
+          "image: $img"
+          $path = ([uri]$img).AbsolutePath
+          $r = Invoke-WebRequest -UseBasicParsing ("http://localhost:5173" + $path)
+          "image status $($r.StatusCode) type $($r.Headers['Content-Type'])"
+          foreach ($u in @(@('customer@demo.local','Demo-pass-123'), @('seller1@demo.local','Demo-pass-123'), @('admin@demo.local','Admin-pass-123!'))) {
+            $res = Invoke-RestMethod -Method Post http://localhost:5173/api/auth/login -ContentType 'application/json' -Body (@{ email = $u[0]; password = $u[1] } | ConvertTo-Json)
+            "login $($u[0]): role $($res.user.role)"
+          }
+          Test-Path .try-local\php.ini; Get-Content .try-local\php.ini
+          Test-Path .try-local\composer.phar
+          Get-Item backend\public\storage | Format-List LinkType, Target
+          # Stop and run again: data must be kept.
+          & taskkill.exe /PID $p.Id /T /F
+          Get-Process php, node -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 3
+          $p2 = Start-Try 2
+          $up = Wait-Up
+          Get-Content run2.log; Get-Content run2.err
+          if (-not $up) { throw 'second run did not come up' }
+          if (-not (Select-String -Path run2.log -Pattern 'Keeping your existing backend' -Quiet)) { throw 'second run rewrote .env' }
+          if (-not (Select-String -Path run2.log -Pattern 'Demo sellers and listings already there' -Quiet)) { throw 'second run reseeded demo' }
+          $res = Invoke-RestMethod -Method Post http://localhost:5173/api/auth/login -ContentType 'application/json' -Body (@{ email = 'admin@demo.local'; password = 'Admin-pass-123!' } | ConvertTo-Json)
+          "second run admin login: $($res.user.role)"
+          & taskkill.exe /PID $p2.Id /T /F
+          'ALL OK'
