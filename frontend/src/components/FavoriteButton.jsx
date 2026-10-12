@@ -1,5 +1,7 @@
+import { Heart } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
 
@@ -23,8 +25,10 @@ export default function FavoriteButton({ productId, initial = false, compact = f
     try {
       if (next) await api.post(`/favorites/${productId}`)
       else await api.delete(`/favorites/${productId}`)
+      if (next) toast.success('Saved to your wishlist', { action: { label: 'View', onClick: () => navigate('/wishlist') } })
     } catch {
       setSaved(!next)
+      toast.error('Could not update your wishlist. Try again.')
     } finally {
       setBusy(false)
     }
@@ -40,13 +44,12 @@ export default function FavoriteButton({ productId, initial = false, compact = f
       aria-label={label}
       title={label}
       className={compact
-        ? 'flex size-9 items-center justify-center rounded-full bg-white/90 shadow-sm hover:bg-white'
+        ? 'flex size-9 items-center justify-center rounded-full bg-white/95 shadow-soft backdrop-blur transition hover:scale-105 hover:bg-white'
         : 'btn-secondary'}
     >
-      <svg viewBox="0 0 24 24" className={`size-5 ${saved ? 'fill-red-600 stroke-red-600' : 'fill-none stroke-stone-700'}`} strokeWidth="2" aria-hidden="true">
-        <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" strokeLinejoin="round" />
-      </svg>
+      <Heart className={`size-[18px] transition-colors ${saved ? 'fill-red-500 stroke-red-500' : 'stroke-stone-700'}`} strokeWidth={2} aria-hidden="true" />
       {!compact && <span>{saved ? 'Saved' : 'Save'}</span>}
     </button>
   )
 }
+

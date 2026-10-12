@@ -8,12 +8,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\OrderResource;
 use App\Models\Order;
 use App\Services\OrderService;
+use App\Services\PaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
-    public function __construct(private readonly OrderService $orders) {}
+    public function __construct(
+        private readonly OrderService $orders,
+        private readonly PaymentService $payments,
+    ) {}
 
     public function index(Request $request)
     {
@@ -40,7 +44,12 @@ class OrderController extends Controller
     public function cancel(Request $request, int $id): OrderResource
     {
         $data = $request->validate(['reason' => ['required', 'string', 'min:3', 'max:500']]);
-        Order::findOrFail($id);
+        $order = Order::findOrFail($id);
+        if ($order->status === OrderStatus::AwaitingPayment) {
+            $this->payments->cancelUnpaid($order->checkout, 'admin', $request->user(), trim($data['reason']));
+
+            return CustomerOrderController::detail($order->fresh(), 'admin');
+        }
         $order = $this->orders->transition($id, OrderStatus::Cancelled, $request->user(), 'admin', trim($data['reason']));
 
         return CustomerOrderController::detail($order, 'admin');

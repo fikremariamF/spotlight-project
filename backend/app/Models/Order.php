@@ -3,9 +3,11 @@
 namespace App\Models;
 
 use App\Enums\OrderStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * One seller's part of a checkout. Totals are snapshots; nothing is mass assignable.
@@ -24,6 +26,7 @@ class Order extends Model
             'items_total_santim' => 'integer',
             'delivery_fee_santim' => 'integer',
             'total_santim' => 'integer',
+            'paid_santim' => 'integer',
             'commission_rate_bp' => 'integer',
             'commission_santim' => 'integer',
             'paid_at' => 'datetime',
@@ -56,6 +59,20 @@ class Order extends Model
     public function history(): HasMany
     {
         return $this->hasMany(OrderStatusHistory::class)->orderBy('id');
+    }
+
+    public function refund(): HasOne
+    {
+        return $this->hasOne(Refund::class);
+    }
+
+    /**
+     * Orders a store can see: cash orders, and online orders once paid. An online order that was
+     * never paid (still waiting, or expired) is the customer's business only.
+     */
+    public function scopeVisibleToSeller(Builder $query): Builder
+    {
+        return $query->where(fn ($q) => $q->where('payment_method', '!=', 'online')->orWhereNotNull('paid_at'));
     }
 
     public function deliveryFeeConfirmed(): bool

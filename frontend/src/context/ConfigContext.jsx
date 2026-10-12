@@ -31,3 +31,16 @@ export function ConfigProvider({ children }) {
 export function useConfig() {
   return useContext(ConfigContext)
 }
+
+/**
+ * How customers can pay right now, in shop wording. Cash is assumed until the config says otherwise.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function usePaymentWording() {
+  const config = useContext(ConfigContext)
+  const online = config.online_payments?.available === true
+  const cash = config.cod_enabled !== false
+  if (online && cash) return { title: 'Pay online or on delivery', body: 'telebirr, CBE Birr, M-Pesa or card, or cash when your furniture arrives.', stat: 'Online or cash', short: 'Pay online or cash on delivery.' }
+  if (online) return { title: 'Pay online', body: 'telebirr, CBE Birr, M-Pesa or card, on a secure Chapa page.', stat: 'Online', short: 'Pay online.' }
+  return { title: 'Pay on delivery', body: 'Pay in cash when your furniture arrives.', stat: 'Cash on delivery', short: 'Pay cash on delivery.' }
+}

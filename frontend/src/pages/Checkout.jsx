@@ -16,6 +16,7 @@ export default function Checkout() {
   const [addressId, setAddressId] = useState('')
   const [fulfillment, setFulfillment] = useState({})
   const [note, setNote] = useState('')
+  const [method, setMethod] = useState(null)
   const [preview, setPreview] = useState({ data: null, error: null, query: null })
   const [placing, setPlacing] = useState(false)
   const [error, setError] = useState(null)
@@ -33,6 +34,10 @@ export default function Checkout() {
   }
   function changeFulfillment(sellerId, mode) {
     setFulfillment((f) => ({ ...f, [sellerId]: mode }))
+    setIdempotencyKey(newIdempotencyKey())
+  }
+  function changeMethod(m) {
+    setMethod(m)
     setIdempotencyKey(newIdempotencyKey())
   }
 
@@ -55,19 +60,27 @@ export default function Checkout() {
   // The totals on screen belong to an older address or delivery choice until the new preview arrives.
   const stale = preview.query !== query
 
-  async function place() {
+  async function place(paymentMethod) {
     setPlacing(true)
     setError(null)
     try {
       const res = await api.post('/checkout', {
         address_id: Number(selectedAddress),
-        payment_method: 'cod',
+        payment_method: paymentMethod,
         fulfillment,
         expected_total_santim: preview.data.grand_total_santim,
         note: note.trim() || null,
       }, { headers: { 'Idempotency-Key': idempotencyKey } })
       refreshCart()
-      navigate('/orders', { replace: true, state: { placed: res.data.data } })
+      const placed = res.data.data
+      if (paymentMethod === 'online') {
+        const url = placed.payment?.payment?.checkout_url
+        // The orders exist and hold the stock; the payment page is the provider's (or the test page).
+        if (url) window.location.assign(url)
+        else navigate(`/payments/return?checkout=${placed.id}`, { replace: true, state: { error: placed.payment_error } })
+        return
+      }
+      navigate('/orders', { replace: true, state: { placed } })
     } catch (err) {
       if (err.response?.status === 409 && err.response.data?.data) {
         // Prices, stock or fees changed: show the fresh numbers and let the customer confirm again.
@@ -91,7 +104,11 @@ export default function Checkout() {
   }
 
   const codOff = config.cod_enabled === false
-  const canPlace = selectedAddress && !stale && !p.has_problems && !placing && !codOff
+  const online = config.online_payments || {}
+  // A fee the seller still has to confirm cannot be paid in advance.
+  const onlineBlocked = !online.available ? 'off' : p.delivery_to_confirm ? 'fee' : null
+  const chosen = method === 'online' && !onlineBlocked ? 'online' : !codOff ? 'cod' : !onlineBlocked ? 'online' : null
+  const canPlace = selectedAddress && !stale && !p.has_problems && !placing && chosen
 
   return (
     <div className="container-page max-w-4xl py-8">
@@ -152,11 +169,28 @@ export default function Checkout() {
 
         <aside className="card h-fit space-y-3 p-4">
           <h2 className="font-semibold text-stone-900">Payment</h2>
-          {codOff ? <Alert tone="warning">Ordering is paused right now. Please try again later.</Alert> : (
-            <label className="flex items-start gap-2 text-sm">
-              <input type="radio" checked readOnly className="mt-1" />
-              <span><span className="font-medium">Cash on delivery</span><br /><span className="text-stone-500">Pay the seller when you receive your furniture.</span></span>
-            </label>
+          {codOff && online.available === false ? <Alert tone="warning">Ordering is paused right now. Please try again later.</Alert> : (
+            <fieldset className="space-y-3">
+              <legend className="sr-only">How do you want to pay?</legend>
+              {online.available && (
+                <label className={`flex items-start gap-2 text-sm ${onlineBlocked ? 'opacity-60' : ''}`}>
+                  <input type="radio" name="payment-method" className="mt-1" checked={chosen === 'online'} disabled={!!onlineBlocked} onChange={() => changeMethod('online')} />
+                  <span>
+                    <span className="font-medium">Pay now online</span><br />
+                    <span className="text-stone-500">telebirr, CBE Birr, M-Pesa, bank apps or card, on Chapa's secure page.</span>
+                    {onlineBlocked === 'fee' && <span className="mt-1 block text-xs text-amber-800">A seller still has to confirm a delivery fee. Choose pickup for that order{codOff ? '' : ', or pay cash on delivery'}.</span>}
+                  </span>
+                </label>
+              )}
+              {!codOff && (
+                <label className="flex items-start gap-2 text-sm">
+                  <input type="radio" name="payment-method" className="mt-1" checked={chosen === 'cod'} onChange={() => changeMethod('cod')} />
+                  <span><span className="font-medium">Cash on delivery</span><br /><span className="text-stone-500">Pay the seller when you receive your furniture.</span></span>
+                </label>
+              )}
+              {chosen === 'online' && online.test_mode && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Test mode: no real money is taken.</p>}
+              {codOff && onlineBlocked === 'fee' && <Alert tone="warning">Cash on delivery is paused, so every order needs a known delivery fee or pickup.</Alert>}
+            </fieldset>
           )}
           <dl className="space-y-1 border-t border-stone-100 pt-3 text-sm">
             <div className="flex justify-between"><dt>Items</dt><dd>{formatETB(p.items_total_santim)}</dd></div>
@@ -164,8 +198,11 @@ export default function Checkout() {
             <div className="flex justify-between text-base font-bold text-stone-900"><dt>Total</dt><dd>{formatETB(p.grand_total_santim)}</dd></div>
           </dl>
           {p.delivery_to_confirm && <p className="text-xs text-stone-500">A seller will confirm their delivery fee before preparing your order. You can cancel if it does not suit you.</p>}
+          {chosen === 'online' && <p className="text-xs text-stone-500">Your items are held for {online.window_minutes || 30} minutes while you pay. Sellers see the order once payment goes through.</p>}
           {p.groups.length > 1 && <p className="text-xs text-stone-500">This creates {p.groups.length} orders, one per seller.</p>}
-          <button type="button" className="btn-primary w-full" disabled={!canPlace} onClick={place}>{placing ? 'Placing order...' : stale ? 'Updating total...' : 'Place order'}</button>
+          <button type="button" className="btn-primary w-full" disabled={!canPlace} onClick={() => place(chosen)}>
+            {placing ? (chosen === 'online' ? 'Opening payment...' : 'Placing order...') : stale ? 'Updating total...' : chosen === 'online' ? `Pay ${formatETB(p.grand_total_santim)}` : 'Place order'}
+          </button>
         </aside>
       </div>
     </div>

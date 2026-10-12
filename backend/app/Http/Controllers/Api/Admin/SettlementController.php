@@ -17,7 +17,8 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Commission sellers owe on cash-on-delivery orders, and the payments admins record against it.
+ * Balances with sellers: commission they owe on cash orders, and online sales the platform owes
+ * them. Admins record payments from sellers and payouts to them.
  */
 class SettlementController extends Controller
 {
@@ -29,6 +30,7 @@ class SettlementController extends Controller
     {
         $filters = $request->validate([
             'owing' => ['nullable', 'boolean'],
+            'owed' => ['nullable', 'boolean'],
             'q' => ['nullable', 'string', 'max:100'],
         ]);
 
@@ -36,6 +38,7 @@ class SettlementController extends Controller
             ->select(['id', 'store_name', 'slug', 'status', 'phone'])
             ->selectRaw(self::BALANCE_SQL.' as balance_santim')
             ->when(filter_var($filters['owing'] ?? false, FILTER_VALIDATE_BOOL), fn ($q) => $q->whereRaw(self::BALANCE_SQL.' > 0'))
+            ->when(filter_var($filters['owed'] ?? false, FILTER_VALIDATE_BOOL), fn ($q) => $q->whereRaw(self::BALANCE_SQL.' < 0'))
             ->when($filters['q'] ?? null, function ($q, $term) {
                 $like = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($term)).'%';
                 $q->whereRaw("LOWER(store_name) LIKE ? ESCAPE '!'", [$like]);
@@ -46,10 +49,9 @@ class SettlementController extends Controller
             ->withQueryString();
 
         $limit = Setting::creditLimitSantim();
-        $outstanding = (int) DB::query()
-            ->fromSub(SellerLedgerEntry::query()->selectRaw('seller_profile_id, sum(amount_santim) as b')->groupBy('seller_profile_id'), 'x')
-            ->where('b', '>', 0)
-            ->sum('b');
+        $balances = DB::query()->fromSub(SellerLedgerEntry::query()->selectRaw('seller_profile_id, sum(amount_santim) as b')->groupBy('seller_profile_id'), 'x');
+        $outstanding = (int) (clone $balances)->where('b', '>', 0)->sum('b');
+        $payable = -(int) (clone $balances)->where('b', '<', 0)->sum('b');
 
         return response()->json([
             'data' => $sellers->getCollection()->map(fn (SellerProfile $s) => [
@@ -67,6 +69,8 @@ class SettlementController extends Controller
                 'total' => $sellers->total(),
                 'outstanding_santim' => $outstanding,
                 'collected_santim' => -(int) SellerLedgerEntry::where('type', 'payment')->sum('amount_santim'),
+                'payable_santim' => $payable,
+                'paid_out_santim' => (int) SellerLedgerEntry::where('type', 'payout')->sum('amount_santim'),
                 'credit_limit_santim' => $limit ?: null,
             ],
         ]);
@@ -102,6 +106,26 @@ class SettlementController extends Controller
         $reference = isset($data['reference']) ? (mb_strtoupper(trim($data['reference'])) ?: null) : null;
 
         $this->ledger->recordPayment($seller->id, $amount, $data['method'], $reference, isset($data['note']) ? trim($data['note']) ?: null : null, $request->user());
+
+        return $this->show($seller)->setStatusCode(201);
+    }
+
+    public function payout(Request $request, SellerProfile $seller): JsonResponse
+    {
+        $data = $request->validate([
+            'amount' => ['required', 'string', 'regex:/^\d{1,10}(\.\d{1,2})?$/'],
+            'method' => ['required', Rule::in(SellerLedgerEntry::METHODS)],
+            'reference' => ['nullable', 'string', 'max:100', Rule::requiredIf(fn () => in_array($request->input('method'), ['bank_transfer', 'telebirr'], true))],
+            'note' => ['nullable', 'string', 'max:500'],
+        ], ['reference.required' => 'Enter the transfer or transaction reference so it cannot be recorded twice.']);
+
+        $amount = Money::toSantim($data['amount']);
+        if ($amount <= 0) {
+            throw ValidationException::withMessages(['amount' => 'Enter an amount above zero.']);
+        }
+        $reference = isset($data['reference']) ? (mb_strtoupper(trim($data['reference'])) ?: null) : null;
+
+        $this->ledger->recordPayout($seller->id, $amount, $data['method'], $reference, isset($data['note']) ? trim($data['note']) ?: null : null, $request->user());
 
         return $this->show($seller)->setStatusCode(201);
     }

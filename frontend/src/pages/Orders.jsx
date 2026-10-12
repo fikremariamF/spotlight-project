@@ -4,6 +4,7 @@ import OrderView, { OrderStatusBadge } from '../components/OrderView'
 import { Alert, EmptyState, ErrorState, PageHeader, Pagination, Spinner } from '../components/ui'
 import { api, parseError } from '../lib/api'
 import { formatDateTime, formatETB } from '../lib/format'
+import { PayActions } from './Payment'
 import { ItemReview } from '../components/Reviews'
 import { useFetch } from '../lib/useFetch'
 
@@ -113,8 +114,13 @@ export function OrderDetail() {
       <Link to="/orders" className="text-sm text-brand-700 hover:underline">Back to orders</Link>
       <div className="mt-3">
         {error && <div className="mb-4"><Alert tone="error">{error}</Alert></div>}
-        <OrderView order={o} viewer="customer" actions={canCancel && (
-          <CancelForm onCancel={cancel} hint="You can cancel until the seller starts preparing your order." />
+        <OrderView order={o} viewer="customer" actions={o.status === 'awaiting_payment' ? (
+          <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+            <p className="mb-2 text-sm text-stone-800">Pay {formatETB(o.total_santim)} online to send this order to the seller. If you placed orders with several sellers together, one payment covers all of them.</p>
+            <PayActions checkoutId={o.checkout_id} dueAt={o.payment_due_at} onChanged={order.reload} />
+          </div>
+        ) : canCancel && (
+          <CancelForm onCancel={cancel} hint={o.payment_status === 'paid' ? 'You can cancel until the seller starts preparing your order. The full amount you paid is refunded.' : 'You can cancel until the seller starts preparing your order.'} />
         )} itemExtra={o.status === 'delivered' ? (item) => <ItemReview key={`${item.id}-${item.review?.id}`} order={o} item={item} onSaved={order.reload} /> : undefined} />
       </div>
     </div>

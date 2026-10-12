@@ -14,6 +14,8 @@ class Checkout extends Model
             'items_total_santim' => 'integer',
             'delivery_total_santim' => 'integer',
             'grand_total_santim' => 'integer',
+            'payment_due_at' => 'datetime',
+            'paid_at' => 'datetime',
         ];
     }
 
@@ -25,5 +27,15 @@ class Checkout extends Model
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class)->orderBy('id');
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class)->orderBy('id');
+    }
+
+    public function isOnline(): bool
+    {
+        return $this->payment_method === 'online';
     }
 }

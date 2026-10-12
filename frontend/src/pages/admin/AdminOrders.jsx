@@ -56,7 +56,9 @@ export function AdminOrderDetail() {
       <div className="mt-3">
         {error && <div className="mb-4"><Alert tone="error">{error}</Alert></div>}
         <OrderView order={o} viewer="admin" actions={!['delivered', 'cancelled'].includes(o.status) && (
-          <CancelForm onCancel={cancel} label="Cancel as admin" hint="Use for disputes, refused deliveries or a seller who cannot fulfil. Reserved stock is returned." />
+          <CancelForm onCancel={cancel} label="Cancel as admin" hint={o.status === 'awaiting_payment'
+            ? 'Not paid yet: this cancels every order in the same checkout and returns the stock.'
+            : `Use for disputes, refused deliveries or a seller who cannot fulfil. Reserved stock is returned.${o.payment_status === 'paid' ? ' The customer paid online, so a refund is added to Payments for you to send.' : ''}`} />
         )} />
       </div>
     </>

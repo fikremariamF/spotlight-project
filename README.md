@@ -10,7 +10,7 @@ The brand name is configurable (`MARKETPLACE_NAME` in `backend/.env`). Nothing e
 
 ## Status
 
-Milestone 1 (foundation and catalog), milestone 2 (in-app inquiries, custom quotes, customer addresses, delivery zones) milestone 3 (cart, checkout with one order per seller, stock reservation, cash on delivery, seller and admin order handling, commission settings) and milestone 4 (seller commission balances and settlements, reviews, admin user management, sales reports with CSV export) are implemented. See `docs/ARCHITECTURE.md` for what is done and what comes next. Online payments, disputes and email or SMS alerts are **not built yet**.
+Milestone 1 (foundation and catalog), milestone 2 (in-app inquiries, custom quotes, customer addresses, delivery zones) milestone 3 (cart, checkout with one order per seller, stock reservation, cash on delivery, seller and admin order handling, commission settings) milestone 4 (seller commission balances and settlements, reviews, admin user management, sales reports with CSV export) milestone 5 (in-app, email and SMS alerts for orders, messages, quotes, approvals and payments), a My account page, a refreshed storefront (compare, quick view, recently viewed, similar items, sharing, phone filter sheet), and online payment through Chapa (telebirr, CBE Birr, M-Pesa, bank apps, cards) with refunds and store payouts are implemented. See `docs/ARCHITECTURE.md` for what is done and what comes next. Online payment runs in test mode until real Chapa keys are added. Disputes are **not built yet**.
 
 ## Requirements
 
@@ -25,7 +25,15 @@ Milestone 1 (foundation and catalog), milestone 2 (in-app inquiries, custom quot
 ./scripts/try-locally.sh     # needs PHP 8.3+, Composer and Node 22+; on a Mac: brew install php composer node
 ```
 
-It uses SQLite (no MySQL needed), adds demo sellers, listings and an admin, starts both servers and prints the logins. Open http://localhost:5173 and press Ctrl+C to stop. Running it again keeps your data. The demo passwords are public, so use it on your own computer only.
+On Windows, in PowerShell (Composer is downloaded if missing, and PHP extensions are switched on for this script only):
+
+```powershell
+winget install -e --id PHP.PHP.8.3
+winget install -e --id OpenJS.NodeJS.LTS
+powershell -ExecutionPolicy Bypass -File scripts\try-locally.ps1
+```
+
+It uses SQLite (no MySQL needed), adds demo sellers, listings and an admin, starts both servers and prints the logins. Open http://localhost:5173 and press Ctrl+C to stop. Running it again keeps your data (and redraws old plain demo pictures as furniture). Paying online opens a test payment page where you choose whether the payment goes through; no real money moves. The demo passwords are public, so use it on your own computer only.
 
 ## Local setup
 
@@ -57,7 +65,7 @@ Demo accounts created by `DemoSeeder`: `seller1@demo.local` to `seller4@demo.loc
 
 ```bash
 cd backend
-php artisan test                 # 79 feature and unit tests (SQLite in memory by default)
+php artisan test                 # feature and unit tests (SQLite in memory by default)
 DB_CONNECTION=mysql DB_DATABASE=marketplace_test DB_USERNAME=... DB_PASSWORD=... php artisan test   # same suite on MySQL
 ./vendor/bin/pint --test         # code style
 
@@ -72,6 +80,12 @@ npm run build                    # production build into dist/
 - Serve the API from the same domain under `/api` (recommended), or set `VITE_API_URL` at build time and list the frontend origin in `CORS_ALLOWED_ORIGINS`.
 - Production `.env`: `APP_ENV=production`, `APP_DEBUG=false`, a real `APP_URL`, strong DB credentials, HTTPS only.
 - Run `php artisan migrate --force`, `php artisan config:cache`, `php artisan route:cache` on each deploy.
+- Run a queue worker all the time (for example under systemd or Supervisor): `php artisan queue:work --tries=3 --max-time=3600`. Emails and text messages are sent by the worker; without it they wait in the `jobs` table. In-app alerts do not need it. Restart it on each deploy with `php artisan queue:restart`.
+- Email: set `MAIL_MAILER` and the `MAIL_*` settings for your mail provider, and `MAIL_FROM_ADDRESS`. With the default `log` mailer, emails are only written to `storage/logs/laravel.log`.
+- Run the scheduler: a cron entry `* * * * * cd /path/to/backend && php artisan schedule:run >> /dev/null 2>&1`. It cancels online orders that were not paid in time (every five minutes) and releases their stock. Without it, unpaid orders hold stock until someone cancels them.
+- Online payment (Chapa): set `MARKETPLACE_PAYMENT_GATEWAY=chapa`, `CHAPA_SECRET_KEY` and `CHAPA_WEBHOOK_SECRET` in `.env` only, never in the code. A `CHASECK_TEST-...` key runs Chapa's test mode; switch to the live key only after a test payment works end to end. In the Chapa dashboard set the webhook URL to `https://your-domain/api/payments/chapa/webhook` with the same secret. `APP_URL` must be the public HTTPS address, because Chapa sends customers back to `APP_URL/payments/return` and calls `APP_URL/api/payments/chapa/callback`. Admins can turn online payment on or off in Admin > Settings. `MARKETPLACE_PAYMENT_GATEWAY=fake` (a test page in the app) is refused when `APP_ENV=production`.
+- Refunds and payouts are recorded by an admin, not sent automatically: send the money in the Chapa dashboard or by transfer, then mark it in Admin > Payments (refunds) or Admin > Settlements (payouts to stores).
+- Text messages: `MARKETPLACE_SMS_DRIVER=log` (the default) sends nothing and only records each text in Admin > Text messages. To send for real, set `MARKETPLACE_SMS_DRIVER=afromessage` and `AFROMESSAGE_TOKEN`, `AFROMESSAGE_IDENTIFIER_ID` and `AFROMESSAGE_SENDER` from your AfroMessage account, in `.env` only, never in the code. Admins can pause all texts in Admin > Settings.
 - `storage/app/public` holds seller photos: put it on persistent storage (or switch the `public` disk to S3-compatible storage) and include it in backups.
 
 ## Backups and recovery
@@ -85,4 +99,7 @@ npm run build                    # production build into dist/
 - **Images do not load**: run `php artisan storage:link` and make sure `APP_URL` matches the URL you open in the browser.
 - **401 after login in production**: the frontend and API are on different origins and `VITE_API_URL` or `CORS_ALLOWED_ORIGINS` is not set.
 - **429 Too Many Requests**: login is limited to 5 attempts per minute per email and IP; wait a minute.
+- **Online payment option missing at checkout**: `MARKETPLACE_PAYMENT_GATEWAY` is `none` or the Chapa key is empty, the admin switch is off, or a store still has to confirm a delivery fee (customers can choose pickup or pay cash).
+- **Paid but the order still says waiting for payment**: open the order page (it checks with Chapa), or look the payment up in Admin > Payments. Check that the webhook URL and secret in the Chapa dashboard match `.env`.
+- **Emails or texts never arrive**: check that a queue worker is running and look at `php artisan queue:failed`. Admin > Text messages shows each text with its status and error.
 - **"Specified key was too long" on old MySQL**: use MySQL 5.7.7+ / MariaDB 10.2+ with utf8mb4.

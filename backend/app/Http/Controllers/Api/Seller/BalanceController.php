@@ -11,7 +11,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
- * The seller's commission balance: what they owe the platform on cash-on-delivery sales.
+ * The seller's balance with the platform: commission owed on cash sales (positive), minus online
+ * sales the platform holds for the seller (which can make it negative: the platform owes them).
  */
 class BalanceController extends Controller
 {
@@ -42,7 +43,10 @@ class BalanceController extends Controller
             'balance_santim' => $balance,
             'commission_total_santim' => (int) ($totals['commission'] ?? 0),
             'paid_total_santim' => -(int) ($totals['payment'] ?? 0),
+            'online_sales_total_santim' => -(int) ($totals['sale'] ?? 0),
+            'payouts_total_santim' => (int) ($totals['payout'] ?? 0),
             'adjustments_total_santim' => (int) ($totals['adjustment'] ?? 0),
+            'owed_to_seller_santim' => max(0, -$balance),
             'credit_limit_santim' => $limit ?: null,
             'over_limit' => $limit > 0 && $balance > $limit,
             'instructions' => Setting::settlementInstructions() ?: null,

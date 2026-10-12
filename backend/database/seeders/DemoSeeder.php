@@ -61,7 +61,8 @@ class DemoSeeder extends Seeder
         ['Outer sub-cities (demo)', 900, 2, 4, ['akaky-kaliti', 'lemi-kura']],
     ];
 
-    private const COLORS = [[94, 75, 60], [120, 98, 76], [70, 90, 82], [140, 120, 96], [88, 70, 92], [160, 110, 70]];
+    /** File name prefix of drawn demo pictures; older demo installs used plain "demo-". */
+    public const ART_PREFIX = 'demo-art-';
 
     public function run(): void
     {
@@ -141,8 +142,8 @@ class DemoSeeder extends Seeder
             $product->is_featured = $i % 5 === 0;
             $product->save();
 
-            $path = "products/{$product->id}/demo-".Str::random(8).'.jpg';
-            Storage::disk('public')->put($path, $this->placeholderJpeg($name, self::COLORS[$i % count(self::COLORS)]));
+            $path = "products/{$product->id}/".self::ART_PREFIX.Str::random(8).'.jpg';
+            Storage::disk('public')->put($path, (new DemoFurnitureArt)->jpeg($name, $color, $i));
             $product->images()->create(['path' => $path, 'alt' => $name, 'sort_order' => 0]);
         }
 
@@ -161,28 +162,5 @@ class DemoSeeder extends Seeder
                 ? 'Password: the value of DEMO_USER_PASSWORD.'
                 : "Generated password (shown once): {$password}");
         }
-    }
-
-    /**
-     * @param  array{int,int,int}  $rgb
-     */
-    private function placeholderJpeg(string $label, array $rgb): string
-    {
-        $img = imagecreatetruecolor(800, 600);
-        [$r, $g, $b] = $rgb;
-        for ($y = 0; $y < 600; $y++) {
-            $shade = (int) (30 * $y / 600);
-            $line = imagecolorallocate($img, min(255, $r + $shade), min(255, $g + $shade), min(255, $b + $shade));
-            imageline($img, 0, $y, 800, $y, $line);
-        }
-        $white = imagecolorallocate($img, 245, 240, 232);
-        $text = Str::limit($label, 34);
-        imagestring($img, 5, (int) (400 - strlen($text) * 4.5), 290, $text, $white);
-
-        ob_start();
-        imagejpeg($img, null, 85);
-        imagedestroy($img);
-
-        return (string) ob_get_clean();
     }
 }

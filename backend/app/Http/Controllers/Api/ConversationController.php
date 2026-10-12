@@ -97,7 +97,7 @@ class ConversationController extends Controller
                 $conversation->save();
             }
 
-            $this->conversations->post($conversation, $customer, 'customer', trim($data['body']));
+            $this->conversations->post($conversation, $customer, 'customer', trim($data['body']), isNewInquiry: $created);
 
             return [$conversation, $created];
         });

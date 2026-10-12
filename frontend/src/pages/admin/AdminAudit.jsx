@@ -20,7 +20,7 @@ export default function AdminAudit() {
       {error && <ErrorState error={error} onRetry={reload} />}
       {data && (data.data.length ? (
         <>
-          <div className="card overflow-x-auto">
+          <div className="card relative overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-stone-200 text-xs text-stone-500 uppercase">
                 <tr><th className="px-4 py-3">When</th><th className="px-4 py-3">Who</th><th className="px-4 py-3">Action</th><th className="px-4 py-3">Subject</th><th className="px-4 py-3">Details</th></tr>

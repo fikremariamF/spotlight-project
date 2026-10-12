@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\Role;
 use App\Enums\UserStatus;
+use App\Notifications\Alert;
+use App\Support\PhoneNumber;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -11,12 +13,14 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
 // role and status are deliberately not fillable: they change only through explicit admin actions.
-#[Fillable(['name', 'email', 'phone', 'password'])]
+#[Fillable(['name', 'email', 'phone', 'password', 'alert_sms', 'alert_email'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -26,6 +30,8 @@ class User extends Authenticatable
     protected $attributes = [
         'role' => 'customer',
         'status' => 'active',
+        'alert_sms' => true,
+        'alert_email' => true,
     ];
 
     /**
@@ -38,6 +44,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'role' => Role::class,
             'status' => UserStatus::class,
+            'alert_sms' => 'boolean',
+            'alert_email' => 'boolean',
         ];
     }
 
@@ -54,6 +62,14 @@ class User extends Authenticatable
     public function addresses(): HasMany
     {
         return $this->hasMany(Address::class);
+    }
+
+    /**
+     * In-app alerts, newest first. Alert ids are time-ordered, so they break ties within a second.
+     */
+    public function notifications(): MorphMany
+    {
+        return $this->morphMany(DatabaseNotification::class, 'notifiable')->latest()->orderByDesc('id');
     }
 
     public function hasRole(Role ...$roles): bool
@@ -75,5 +91,19 @@ class User extends Authenticatable
     {
         return $this->role === Role::Seller
             && $this->sellerProfile?->isApproved() === true;
+    }
+
+    /**
+     * Where SMS alerts go: the store phone for sellers, otherwise the account phone. Null when
+     * neither is an Ethiopian mobile number. Alerts about an order fall back to the order's phone.
+     */
+    public function routeNotificationForSms(mixed $notification = null): ?string
+    {
+        $own = $this->role === Role::Seller
+            ? ($this->loadMissing('sellerProfile')->sellerProfile?->phone ?? $this->phone)
+            : $this->phone;
+
+        return PhoneNumber::ethiopianMobile($own)
+            ?? PhoneNumber::ethiopianMobile($notification instanceof Alert ? $notification->fallbackPhone : null);
     }
 }

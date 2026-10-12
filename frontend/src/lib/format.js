@@ -87,6 +87,7 @@ export function santimToBirr(santim) {
 }
 
 export const ORDER_STATUS_LABELS = {
+  awaiting_payment: 'Waiting for payment',
   pending_confirmation: 'Waiting for seller',
   confirmed: 'Confirmed',
   processing: 'Being prepared',
@@ -97,6 +98,7 @@ export const ORDER_STATUS_LABELS = {
 }
 
 export const ORDER_STATUS_TONES = {
+  awaiting_payment: 'bg-orange-100 text-orange-800',
   pending_confirmation: 'bg-amber-100 text-amber-800',
   confirmed: 'bg-sky-100 text-sky-800',
   processing: 'bg-sky-100 text-sky-800',
@@ -116,16 +118,30 @@ export function orderStatusLabel(status, fulfillment) {
 }
 
 /**
- * Button text for the seller moving an order to `status`.
+ * Button text for the seller moving an order to `status`. Orders paid online need no cash collected.
  */
-export function orderActionLabel(status, fulfillment) {
+export function orderActionLabel(status, fulfillment, paymentMethod = 'cod') {
   const pickup = fulfillment === 'pickup'
+  const paid = paymentMethod === 'online' ? '' : ' and paid'
   return {
     processing: 'Start preparing',
     ready: pickup ? 'Ready for pickup' : 'Ready for delivery',
     dispatched: 'Out for delivery',
-    delivered: pickup ? 'Picked up and paid' : 'Delivered and paid',
+    delivered: pickup ? `Picked up${paid}` : `Delivered${paid}`,
   }[status] || status
+}
+
+/**
+ * One line about how an order is paid, for every viewer.
+ */
+export function paymentSummary(order) {
+  if (order.payment_method !== 'online') return `Cash on delivery · ${order.payment_status === 'paid' ? 'paid' : 'not paid yet'}`
+  return {
+    unpaid: order.status === 'cancelled' ? 'Online payment · never paid' : 'Online payment · waiting for payment',
+    paid: 'Paid online',
+    refund_due: 'Paid online · refund on the way',
+    refunded: 'Paid online · refunded',
+  }[order.payment_status] || 'Online payment'
 }
 
 export function formatDateTime(iso) {
@@ -141,5 +157,5 @@ export function newIdempotencyKey() {
   return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
 }
 
-export const ENTRY_LABELS = { commission: 'Commission', payment: 'Payment received', adjustment: 'Adjustment' }
-export const METHOD_LABELS = { cash: 'Cash', bank_transfer: 'Bank transfer', telebirr: 'telebirr', other: 'Other' }
+export const ENTRY_LABELS = { commission: 'Commission', payment: 'Payment received', adjustment: 'Adjustment', sale: 'Online sale', payout: 'Paid out to store' }
+export const METHOD_LABELS = { cash: 'Cash', bank_transfer: 'Bank transfer', telebirr: 'telebirr', chapa: 'Chapa', other: 'Other' }

@@ -19,7 +19,10 @@ use Illuminate\Validation\ValidationException;
  */
 class ReviewService
 {
-    public function __construct(private readonly AuditLogger $audit) {}
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly Alerts $alerts,
+    ) {}
 
     /**
      * The last moment a review for this delivered order line can be written or edited, or null if it never can.
@@ -58,6 +61,7 @@ class ReviewService
                 $review->body = $body;
                 $review->save();
                 $this->recount($review);
+                $this->alerts->reviewPosted($review);
 
                 return $review;
             });
@@ -85,9 +89,13 @@ class ReviewService
     public function reply(SellerProfile $seller, int $reviewId, ?string $reply): Review
     {
         $review = Review::where('seller_profile_id', $seller->id)->findOrFail($reviewId);
+        $isFirstReply = blank($review->seller_reply) && filled($reply);
         $review->seller_reply = $reply;
         $review->seller_replied_at = $reply ? now() : null;
         $review->save();
+        if ($isFirstReply) {
+            $this->alerts->reviewReplied($review);
+        }
 
         return $review;
     }

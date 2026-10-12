@@ -94,6 +94,6 @@ class OrderController extends Controller
 
     private function scoped(Request $request)
     {
-        return Order::where('seller_profile_id', $request->user()->sellerProfile?->id ?? 0);
+        return Order::where('seller_profile_id', $request->user()->sellerProfile?->id ?? 0)->visibleToSeller();
     }
 }

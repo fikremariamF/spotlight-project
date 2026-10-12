@@ -59,7 +59,7 @@ export function parseError(error) {
     return { message: 'Could not reach the server. Check your connection and try again.', fields: {} }
   }
   const fields = {}
-  if (res.status === 422 && res.data?.errors) {
+  if ([422, 429].includes(res.status) && res.data?.errors) {
     for (const [key, messages] of Object.entries(res.data.errors)) {
       // "images.0" style keys collapse onto their field.
       fields[key.split('.')[0]] ??= messages[0]

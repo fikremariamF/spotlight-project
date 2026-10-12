@@ -107,6 +107,24 @@ erDiagram
 | reviews | order_item_id unique, order_id, product_id, seller_profile_id, customer_id, rating 1-5, body, seller_reply, is_hidden, hidden_reason. Unique (customer_id, product_id) |
 | products, seller_profiles | + rating_count, rating_sum, recomputed from visible reviews on every change |
 
+### Added in milestone 5
+
+| Table | Key columns and constraints |
+|---|---|
+| notifications | Laravel's database notifications: uuid id (time-ordered), type (the alert kind, for example `order.new`), notifiable, data {title, body, url}, read_at. Index (notifiable_type, notifiable_id, read_at) |
+| sms_messages | notification_id unique (one text per alert, so a retried job never texts twice), user_id, kind, to (+251...), body (max 480), driver, status (pending/sent/logged/failed), provider_message_id, error, attempts, sent_at |
+| users | + alert_sms, alert_email (both default on) |
+
+### Added for online payments
+
+| Table | Key columns and constraints |
+|---|---|
+| checkouts | + payment_due_at (online only), paid_at |
+| orders | + paid_santim (what the customer paid online for this order); status `awaiting_payment` |
+| payments | One attempt to pay a checkout: checkout_id, customer_id, provider, tx_ref (unique, sent to the provider), amount_santim, currency, status (pending/paid/failed/cancelled/expired), checkout_url (hidden), provider_reference, method, problem, paid_at, last_checked_at |
+| refunds | order_id (unique, nullable), payment_id, customer_id, amount_santim, reason, status (due/refunded), method, reference, note, refunded_by, refunded_at |
+| seller_ledger_entries | + types `sale` (negative: an online sale the marketplace holds for the store) and `payout` (positive: money sent to the store) |
+
 Foreign keys use `restrict` where deleting the parent would destroy history (sellers, categories, cities) and `cascade` only for pure child rows (images, favorites).
 
 ## Business rules implemented
@@ -187,12 +205,51 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 - Reports cover a date range of up to a year in Addis Ababa time: orders placed, delivered gross sales, item value, delivery fees, commission earned, commission collected, cancellations by side, top stores and a daily table. Gross sales, commission and collections are kept separate and none is called profit.
 - Orders in the range can be downloaded as CSV. Cells starting with = + - @ are prefixed so spreadsheets do not run them as formulas. Exports are audited.
 
+**Alerts (milestone 5).**
+- Every alert is an in-app alert (the bell in the header, `/notifications`), and some also go by email or SMS. Who gets what is in `app/Services/Alerts.php`. Texts are kept for things that need action soon: a new order and a cancelled order for the store, a confirmed, dispatched, ready-for-pickup or cancelled order for the customer, a new inquiry, and a store being approved, suspended or reinstated.
+- Alerts are sent only after the database transaction commits, so a rolled-back checkout or status change alerts nobody. A failing mail server or SMS provider is logged and never turns the action itself into an error.
+- In-app alerts are written straight away; email and SMS go through the queue, retried 3 times (after 1 and 5 minutes). Provider errors that a retry cannot fix (bad number, rejected request, missing token) are not retried.
+- Users choose email and SMS on or off in Alert settings, and set their mobile number there. Suspended accounts get nothing. Admins can pause every text in Admin > Settings, and see each text and its status in Admin > Text messages.
+- Texts go only to Ethiopian mobile numbers (09 and 07), stored as +2519... or +2517... A store's texts go to the store phone. A customer without a mobile number on the account gets order texts at the phone given at checkout.
+- Messages already have their own unread badge, so they make no in-app alert. They email at most once per conversation and person every 30 minutes. A new inquiry also texts the store, at most once per customer and store a day. Both limits use atomic cache adds, verified with 6 parallel requests: exactly one email and one text.
+- Quotes alert through the quote (sent, accepted, declined), not as a message.
+
+**My account.**
+- Every account has a My account page (`/account`) to change its name, email, phone and password, and to sign out other devices. Role and status cannot be changed there.
+- Changing the email or the password needs the current password. The old email address gets a notice when the email changes, and the account gets one when the password changes. These security emails ignore the alert settings.
+- A password change signs out every other device and keeps this one. Admins need 12 characters with a symbol, as when created from the command line.
+- Wrong current passwords are limited to 5 per account every 15 minutes. Each attempt is counted before it is checked, so parallel guesses cannot get past the limit; a correct password resets the count. Typos in other fields are not counted.
+- The customer header shows Account instead of Addresses; addresses are linked from My account and used at checkout.
+
+**Shopping helpers and look (UI refresh).**
+- Libraries: lucide-react (icons), @headlessui/react (accessible menus, dialogs, drawer, filter sheet), sonner (toasts), embla-carousel-react (photo gallery and product rails), Inter and Fraunces fonts from @fontsource (served from the app, no Google Fonts request).
+- Compare: up to 4 listings side by side (price, rating, stock, size, material, color, condition, delivery, custom orders, seller, location) with the lowest price marked. The list is kept in this browser (`mp_compare`), follows other open tabs, and still works for the page view when site storage is blocked. Listings that are removed or hidden since they were picked leave the list on the compare page, with a note.
+- Recently viewed: the last 12 listings this browser opened (`mp_recent`), shown on the home page and under each listing (without the one being viewed). Prices and stock are always fetched fresh.
+- Quick view on product cards (tablet and desktop), similar furniture from the same category under each listing, share to Telegram, WhatsApp, the phone's share sheet or a copied link.
+- Catalog: active filters shown as removable chips; on phones the filters open as a bottom sheet with a live result count.
+- Phones: the listing page has a fixed buy bar; the compare pill is hidden there so it does not cover the bar.
+- `GET /products?slugs=a,b,c` returns only those listings that are visible to the public (unknown or hidden ones are skipped), at most 24, for compare and recently viewed.
+- Account, seller and admin pages are loaded on demand, so shoppers download less on first visit.
+- Demo listings get drawn furniture pictures (`DemoFurnitureArt`). `php artisan marketplace:demo-pictures` redraws the old plain demo pictures on an existing demo database; it touches only demo images, never seller uploads.
+
+**Online payment (Chapa).**
+- One Chapa page covers telebirr, CBE Birr, M-Pesa, bank apps and cards. The customer picks "Pay now online" or "Cash on delivery" at checkout. Paying online needs every delivery fee to be known; otherwise the customer chooses pickup or cash.
+- An online checkout creates its orders as `awaiting_payment` and reserves the stock at once. Stores do not see these orders and get no alert until payment goes through. The customer has 30 minutes (`MARKETPLACE_PAYMENT_WINDOW_MINUTES`) to pay; the order page shows a countdown, Pay now and Cancel.
+- Nothing the browser or a callback says is trusted. The return page, the callback, the webhook and the expiry job only trigger a server-side verify with Chapa, and only Chapa's verify answer changes anything. Webhooks must carry a valid HMAC signature. The provider is never called inside a database transaction.
+- A verified payment of the full amount sends every order of the checkout to its store (`pending_confirmation`, paid). Less than the total, or another currency, is not accepted and becomes a refund. More than the total is accepted and noted on the payment.
+- A payment that arrives after the order was cancelled, or a second payment for a checkout already paid, becomes a refund. Checking the same payment any number of times, in parallel, changes things once (row locks on checkout, then payment, then orders; verified with 20 parallel checks on MariaDB).
+- Each try is a separate payment with its own reference. A page opened in the last 15 minutes is reused. If Chapa cannot start the payment, the order stays and the customer can retry or cancel.
+- Expiry (`marketplace:expire-payments`, every five minutes through the scheduler) first verifies any open payment. If Chapa cannot be reached it waits one more window before cancelling. Cancelling unpaid orders (customer, admin or expiry) cancels the whole checkout, releases the stock and, unless an admin did it, puts the items back in the customer's cart.
+- Cancelling a paid order (customer, store or admin) creates a refund for what was paid. Refunds are sent by an admin in the Chapa dashboard or by transfer, then marked in Admin > Payments with the method and reference; the customer is told at both steps.
+- Ledger: when a paid order is delivered the store is charged its commission (+) and credited the sale (- what was paid), so the balance goes negative: the marketplace owes the store. Admins record payouts in Admin > Settlements; a payout cannot exceed what is owed and a reference cannot be used twice. A store over its commission credit limit can still confirm orders that are already paid.
+- The test gateway (`MARKETPLACE_PAYMENT_GATEWAY=fake`) shows an in-app test page where you choose the outcome. It is replaced by "not available" whenever `APP_ENV=production`.
+
 **Ownership.** All seller endpoints look records up through the signed-in seller's own profile, so another seller's id returns 404 (no existence leak). Tests cover show, update, delete, submit, archive, image upload and image delete across sellers.
 
 ## Security measures in place
 
 - bcrypt password hashing; minimum 8 characters with letters and numbers (12 + symbols for admins).
-- Login: constant-time path for unknown emails, 5 attempts per minute per email+IP and 20 per IP. Registration 10 per hour per IP. Uploads 30 per minute per user. Catalog 120 per minute.
+- Login: constant-time path for unknown emails, 5 attempts per minute per email+IP and 20 per IP. Registration 10 per hour per IP. Uploads 30 per minute per user. Catalog browsing 300 per minute per user, or per IP for guests (`MARKETPLACE_CATALOG_RATE`; set high because mobile carriers put many phones behind one IP).
 - Validation on every write; LIKE search input is escaped; all queries use bindings.
 - Mass assignment restricted with explicit fillable lists; strict model mode in non-production to catch silently dropped attributes and lazy loading.
 - Uploads: content-checked images only (jpg, png, webp; no SVG), 5 MB, 200 to 8000 px, max 8 per listing enforced under a row lock, stored under random names.
@@ -200,7 +257,9 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 - CORS limited to `CORS_ALLOWED_ORIGINS`. Bearer tokens mean CSRF does not apply to the API; there are no cookie-authenticated API routes.
 - CSV exports escape formula-like cells.
 - Checkout requires an `Idempotency-Key` header; prices and totals are always recomputed on the server.
-- Audit log for settlement payments and adjustments, review hiding, account suspension, report exports, checkouts, every order status change, settings changes, seller applications and reviews, listing create/update/submit/archive/delete/moderation, category changes, quotes (sent, accepted, declined, withdrawn), delivery zone changes and CLI admin creation.
+- Audit log for settlement payments and adjustments, review hiding, account suspension, report exports, checkouts, every order status change, settings changes, seller applications and reviews, listing create/update/submit/archive/delete/moderation, category changes, quotes (sent, accepted, declined, withdrawn), delivery zone changes, alert setting changes, profile and password changes, signing out other devices and CLI admin creation.
+- Payment provider keys come only from `.env`. Payment state changes only after a server-side verify with the provider; callbacks and the return page cannot mark anything paid. Payment endpoints are limited (checkout limit for starting payments, 120 per minute per IP for callbacks). Customers can only see and pay their own checkouts (404 otherwise).
+- SMS provider credentials come only from `.env`. Logs mask phone numbers; the full number is visible only to admins in Admin > Text messages.
 
 ## Decisions and defaults (change if the business decides otherwise)
 
@@ -211,11 +270,16 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 | Moderation on edit | content fields only | Avoids blocking sellers from updating price and stock while still catching bait-and-switch content |
 | Brand name | "Betoch Furniture" via `MARKETPLACE_NAME` | Placeholder; one env change |
 | Commission | 10% starting value, editable in Admin > Settings | Frozen on each order at placement |
-| Payment | cash on delivery only, switchable in Admin > Settings | No online provider is integrated yet; turning COD off pauses checkout |
+| Payment | cash on delivery and online through Chapa, each switchable in Admin > Settings | Chapa covers telebirr, CBE Birr, M-Pesa, bank apps and cards with one integration |
+| Online payment window | 30 minutes, then the order is cancelled and stock released | Long enough to pay from a phone; short enough not to hide stock |
+| Refunds and payouts | recorded by an admin after sending the money | Chapa's refund and transfer APIs are not verified against a live account yet; manual is safe to start with |
+| Paid online, store over its credit limit | can still confirm | The customer has paid, and delivering lowers what the store owes |
 | Delivery for several items from one seller | one trip, highest line fee | Matches how sellers deliver; avoids charging per item |
 | Contact seller | in-app inquiries, plus the public store phone while `MARKETPLACE_SHOW_SELLER_PHONE=true` | Keeps today's behavior. Turning it off keeps deals in the app, where commission can be earned |
 | Admin access to conversations | none | Privacy by default. Needed later for disputes, with an audited read |
-| New-message alerts | in-app unread badge, polled every 60 seconds | No email or SMS provider is configured yet |
+| New-message alerts | in-app unread badge, plus at most one email per conversation every 30 minutes | Avoids an email per chat line |
+| SMS provider | AfroMessage behind a driver setting; `log` (send nothing) by default | Common Ethiopian provider with a simple HTTP API. Untested against a live account until the business opens one |
+| Which alerts are texts | only alerts that need action within hours | Texts cost money per message |
 
 ## Planned design for the next milestones
 
@@ -223,11 +287,9 @@ Checkout, orders and stock reservation shipped in milestone 3 (see Business rule
 
 **Returns and disputes.** returned and disputed states after delivery, with an audited admin read of the conversation.
 
-**Payments.** `payment_transactions` with provider, provider reference (unique), amount_santim, currency, status (pending/succeeded/failed/refunded) and raw callback. Callbacks are verified server-side with the provider, amounts and currency are checked against the checkout, and the unique provider reference plus an idempotency check prevents double processing. A clearly labeled development driver exists only outside production. Cash on delivery is a config flag.
+**Payments, later steps.** Sending refunds and store payouts through Chapa's APIs instead of by hand, once tested against a live account. Direct telebirr or bank integrations only if Chapa's fees or coverage make it worth it.
 
-**Payouts for prepaid orders.** Once online payments exist the platform will hold customer money, so the same ledger will also carry what the platform owes each seller (negative entries) and payouts.
-
-**Also planned:** email or SMS alerts for new messages and order changes, online payments (Telebirr, Chapa or bank), disputes and returns.
+**Also planned:** disputes and returns.
 
 ## Roadmap
 
@@ -239,7 +301,9 @@ Checkout, orders and stock reservation shipped in milestone 3 (see Business rule
 | 4 | Seller: application, approval, dashboard, listings, photos, stock | Done. Orders and finance views come with stage 5 |
 | 6 (part) | Admin: seller approval, listing moderation, categories, audit log, counts | Done |
 | 2 (milestone 2) | Inquiries and custom quotes, customer addresses, delivery zones | Done |
-| 5 | Cart, checkout, multi-seller orders, stock reservation, cash on delivery | Done (milestone 3). Online payment provider is planned |
+| 5 | Cart, checkout, multi-seller orders, stock reservation, cash on delivery | Done (milestone 3). Online payment added later (see the last row) |
 | 6 rest | Seller and admin order handling, commission settings | Done (milestone 3) |
 | 6 (milestone 4) | Commission balances and settlements, reviews, admin users, reports and CSV export | Done. Disputes are planned |
+| Milestone 5 | In-app, email and SMS alerts, alert settings, admin text message log | Done. Live SMS needs an AfroMessage account |
+| Online payments | Chapa checkout, payment window and expiry, refunds, store payouts, admin Payments page | Done. Live payments need a Chapa account and keys |
 | 7 | CI, end-to-end tests, deployment scripts, backups automation | Planned |

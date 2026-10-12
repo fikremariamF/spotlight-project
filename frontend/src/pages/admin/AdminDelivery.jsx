@@ -130,7 +130,7 @@ export default function AdminDelivery() {
               <Alert tone="warning">Not in any zone: {unassigned.map((a) => a.name).join(', ')}. Customers there see "fee confirmed by the seller".</Alert>
             </div>
           )}
-          <div className="card overflow-x-auto">
+          <div className="card relative overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-stone-200 text-xs text-stone-500 uppercase">
                 <tr><th className="px-4 py-3">Zone</th><th className="px-4 py-3">Fee</th><th className="px-4 py-3">Days</th><th className="px-4 py-3">Sub-cities</th><th className="px-4 py-3">Status</th><th className="px-4 py-3"><span className="sr-only">Actions</span></th></tr>

@@ -4,6 +4,8 @@ namespace App\Enums;
 
 enum OrderStatus: string
 {
+    // Placed with online payment and waiting for it; the store does not see it yet.
+    case AwaitingPayment = 'awaiting_payment';
     case PendingConfirmation = 'pending_confirmation';
     case Confirmed = 'confirmed';
     case Processing = 'processing';
@@ -24,6 +26,7 @@ enum OrderStatus: string
     public function rank(): int
     {
         return match ($this) {
+            self::AwaitingPayment => -1,
             self::PendingConfirmation => 0,
             self::Confirmed => 1,
             self::Processing => 2,

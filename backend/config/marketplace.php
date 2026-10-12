@@ -25,6 +25,9 @@ return [
     'catalog' => [
         'per_page_default' => 24,
         'per_page_max' => 48,
+        // Browsing requests per minute per signed-in user, or per IP for guests. Mobile carriers
+        // put many phones behind one IP, and a product page makes about five requests.
+        'requests_per_minute' => (int) env('MARKETPLACE_CATALOG_RATE', 300),
     ],
 
     'products' => [
@@ -67,8 +70,28 @@ return [
     ],
 
     'payments' => [
-        // Cash on delivery. Online payment providers are added in a later milestone.
+        // Starting value for the Admin > Settings switch.
         'cod_enabled' => (bool) env('MARKETPLACE_COD_ENABLED', true),
+        // Starting value for the Admin > Settings switch. Online payment also needs a working gateway.
+        'online_enabled' => (bool) env('MARKETPLACE_ONLINE_PAYMENTS_ENABLED', true),
+        // 'none' turns online payment off. 'chapa' uses Chapa (Telebirr, CBE Birr, M-Pesa, cards).
+        // 'fake' shows a test page instead of a real provider; it never works when APP_ENV=production.
+        'gateway' => env('MARKETPLACE_PAYMENT_GATEWAY', 'none'),
+        // Minutes a customer has to finish paying before the order is cancelled and the stock released.
+        'window_minutes' => (int) env('MARKETPLACE_PAYMENT_WINDOW_MINUTES', 30),
+    ],
+
+    // Order and account alerts. In-app alerts are always on; email uses the normal mail settings.
+    'alerts' => [
+        // 'log' writes each SMS to the log and the admin SMS log without sending it (local use).
+        // 'afromessage' sends through AfroMessage (set AFROMESSAGE_* in .env).
+        'sms_driver' => env('MARKETPLACE_SMS_DRIVER', 'log'),
+        // Starting value for the Admin > Settings switch that pauses all SMS.
+        'sms_enabled' => (bool) env('MARKETPLACE_SMS_ENABLED', true),
+        // At most one "new message" email per conversation and recipient in this many minutes.
+        'message_email_cooldown_minutes' => 30,
+        // At most one "new inquiry" SMS per customer and store in this many hours.
+        'inquiry_sms_cooldown_hours' => 24,
     ],
 
     'cart' => [

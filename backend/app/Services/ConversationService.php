@@ -11,6 +11,8 @@ use Illuminate\Validation\ValidationException;
 
 class ConversationService
 {
+    public function __construct(private readonly Alerts $alerts) {}
+
     /**
      * Throw a 422 unless the side may write to this conversation right now.
      * Existing threads stay readable when a store is suspended, but nobody can add to them.
@@ -29,11 +31,11 @@ class ConversationService
 
     /**
      * Append a message and move both the conversation's latest pointer and the sender's read pointer,
-     * so senders never see their own messages as unread.
+     * so senders never see their own messages as unread. Quote messages alert through the quote itself.
      */
-    public function post(Conversation $conversation, User $sender, string $side, string $body, ?Quote $quote = null): Message
+    public function post(Conversation $conversation, User $sender, string $side, string $body, ?Quote $quote = null, bool $isNewInquiry = false): Message
     {
-        return DB::transaction(function () use ($conversation, $sender, $side, $body, $quote) {
+        return DB::transaction(function () use ($conversation, $sender, $side, $body, $quote, $isNewInquiry) {
             $message = new Message(['body' => $body]);
             $message->conversation_id = $conversation->id;
             $message->sender_id = $sender->id;
@@ -45,6 +47,10 @@ class ConversationService
                 'last_message_at' => $message->created_at,
                 Conversation::readColumn($side) => $message->id,
             ])->save();
+
+            if ($quote === null) {
+                $this->alerts->messagePosted($conversation, $side, $isNewInquiry);
+            }
 
             return $message;
         });

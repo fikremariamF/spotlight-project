@@ -38,7 +38,7 @@ class DashboardController extends Controller
                 'delivered_gross_santim' => (int) Order::where('status', OrderStatus::Delivered->value)->sum('total_santim'),
                 'delivered_items_santim' => (int) Order::where('status', OrderStatus::Delivered->value)->sum('items_total_santim'),
                 'commission_earned_santim' => (int) Order::where('status', OrderStatus::Delivered->value)->sum('commission_santim'),
-                'open_orders_value_santim' => (int) Order::whereNotIn('status', [OrderStatus::Delivered->value, OrderStatus::Cancelled->value])->sum('total_santim'),
+                'open_orders_value_santim' => (int) Order::whereNotIn('status', [OrderStatus::Delivered->value, OrderStatus::Cancelled->value, OrderStatus::AwaitingPayment->value])->sum('total_santim'),
                 'commission_rate_percent' => Setting::commissionRateBp() / 100,
                 // What sellers still owe on cash-on-delivery sales (credits on other stores do not offset it).
                 'commission_outstanding_santim' => (int) DB::query()

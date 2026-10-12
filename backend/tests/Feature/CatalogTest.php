@@ -36,6 +36,24 @@ class CatalogTest extends TestCase
         return collect($this->getJson('/api/products'.$query)->assertOk()->json('data'))->pluck('id')->all();
     }
 
+    public function test_slugs_filter_returns_only_those_visible_listings(): void
+    {
+        $a = $this->published(['slug' => 'oak-table']);
+        $b = $this->published(['slug' => 'grey-sofa']);
+        $this->published(['slug' => 'not-asked']);
+        $hidden = Product::factory()->create(['seller_profile_id' => $this->seller->id, 'category_id' => $this->category()->id, 'slug' => 'draft-bed']);
+
+        $ids = $this->listedIds('?slugs='.urlencode(' oak-table, grey-sofa,draft-bed,unknown,,oak-table '));
+        sort($ids);
+        $this->assertSame([$a->id, $b->id], $ids, 'draft and unknown slugs are skipped');
+        $this->assertNotContains($hidden->id, $ids);
+
+        // Only the first 24 distinct slugs count, so the list cannot be used to pull the whole catalog.
+        $many = collect(range(1, 30))->map(fn ($i) => "x{$i}")->push('oak-table')->implode(',');
+        $this->assertSame([], $this->listedIds('?slugs='.$many));
+        $this->getJson('/api/products?slugs='.str_repeat('a', 3001))->assertUnprocessable();
+    }
+
     public function test_only_publicly_visible_listings_are_returned(): void
     {
         $visible = $this->published(['name' => 'Visible Sofa']);
@@ -230,5 +248,15 @@ class CatalogTest extends TestCase
     {
         $this->published();
         $this->getJson('/api/products')->assertOk()->assertJsonMissingPath('data.0.is_favorite');
+    }
+
+    public function test_browsing_limit_comes_from_config(): void
+    {
+        config(['marketplace.catalog.requests_per_minute' => 3]);
+
+        for ($i = 0; $i < 3; $i++) {
+            $this->getJson('/api/products')->assertOk();
+        }
+        $this->getJson('/api/products')->assertStatus(429);
     }
 }

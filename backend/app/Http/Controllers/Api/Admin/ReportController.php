@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Enums\OrderStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\Payment;
+use App\Models\Refund;
 use App\Models\SellerLedgerEntry;
 use App\Services\AuditLogger;
 use Carbon\CarbonImmutable;
@@ -23,7 +25,8 @@ class ReportController extends Controller
         [$from, $to, $start, $end] = $this->range($request);
 
         $delivered = Order::where('status', OrderStatus::Delivered->value)->whereBetween('delivered_at', [$start, $end]);
-        $placed = Order::whereBetween('created_at', [$start, $end]);
+        // Online orders that were never paid are not sales; they are counted separately.
+        $placed = Order::visibleToSeller()->whereBetween('created_at', [$start, $end]);
         $tz = config('marketplace.timezone');
 
         // Daily series in PHP: day boundaries follow Addis Ababa time on every database engine.
@@ -44,8 +47,10 @@ class ReportController extends Controller
             ->with('seller:id,store_name,slug')->get()
             ->map(fn ($r) => ['store_name' => $r->seller?->store_name, 'slug' => $r->seller?->slug, 'orders' => (int) $r->orders, 'gross_santim' => (int) $r->gross, 'commission_santim' => (int) $r->commission]);
 
-        $cancelled = Order::where('status', OrderStatus::Cancelled->value)->whereBetween('cancelled_at', [$start, $end])
+        $cancelled = Order::visibleToSeller()->where('status', OrderStatus::Cancelled->value)->whereBetween('cancelled_at', [$start, $end])
             ->selectRaw('cancelled_by, count(*) as c')->groupBy('cancelled_by')->pluck('c', 'cancelled_by');
+        $unpaid = Order::where('payment_method', 'online')->whereNull('paid_at')->where('status', OrderStatus::Cancelled->value)
+            ->whereBetween('cancelled_at', [$start, $end])->count();
 
         return response()->json(['data' => [
             'from' => $from->toDateString(),
@@ -64,6 +69,13 @@ class ReportController extends Controller
                 'by_customer' => (int) ($cancelled['customer'] ?? 0),
                 'by_seller' => (int) ($cancelled['seller'] ?? 0),
                 'by_admin' => (int) ($cancelled['admin'] ?? 0),
+            ],
+            'online' => [
+                'paid_santim' => (int) Payment::where('status', 'paid')->whereBetween('paid_at', [$start, $end])->sum('amount_santim'),
+                'unpaid_cancelled_orders' => $unpaid,
+                'refunds_due_santim' => (int) Refund::where('status', 'due')->sum('amount_santim'),
+                'refunded_santim' => (int) Refund::where('status', 'refunded')->whereBetween('refunded_at', [$start, $end])->sum('amount_santim'),
+                'paid_out_santim' => (int) SellerLedgerEntry::where('type', 'payout')->whereBetween('created_at', [$start, $end])->sum('amount_santim'),
             ],
             'commission_collected_santim' => -(int) SellerLedgerEntry::where('type', 'payment')->whereBetween('created_at', [$start, $end])->sum('amount_santim'),
             'top_sellers' => $topSellers,

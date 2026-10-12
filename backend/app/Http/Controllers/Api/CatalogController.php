@@ -23,6 +23,8 @@ class CatalogController extends Controller
 {
     public const SORTS = ['recommended', 'newest', 'price_asc', 'price_desc'];
 
+    public const MAX_SLUGS = 24;
+
     public function categories(): AnonymousResourceCollection
     {
         $categories = Category::active()
@@ -65,6 +67,8 @@ class CatalogController extends Controller
             'custom' => ['nullable', 'boolean'],
             'delivery' => ['nullable', 'boolean'],
             'in_stock' => ['nullable', 'boolean'],
+            // Comma-separated listing slugs, for recently viewed and compare. Unknown or hidden ones are skipped.
+            'slugs' => ['nullable', 'string', 'max:3000'],
             'sort' => ['nullable', Rule::in(self::SORTS)],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('marketplace.catalog.per_page_max')],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -85,6 +89,11 @@ class CatalogController extends Controller
             $category = Category::active()->where('slug', $filters['category'])->first();
             // Unknown or inactive category: return an empty page rather than every product.
             $query->whereIn('category_id', $category ? $category->selfAndChildIds() : [0]);
+        }
+
+        if (! empty($filters['slugs'])) {
+            $slugs = collect(explode(',', $filters['slugs']))->map(fn ($s) => trim($s))->filter()->unique()->take(self::MAX_SLUGS)->values();
+            $query->whereIn('products.slug', $slugs->all());
         }
 
         if (! empty($filters['seller'])) {

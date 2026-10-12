@@ -20,7 +20,7 @@ export function SellerOrders() {
       <PageHeader title="Orders" subtitle="Confirm new orders quickly: customers wait for your confirmation before anything happens."
         actions={<><Link to="/seller" className="btn-secondary">Listings</Link><Link to="/seller/balance" className="btn-secondary">Balance</Link></>} />
       {summary.data?.data.balance.over_limit && (
-        <div className="mb-4"><Alert tone="error">Your unpaid commission is over the limit, so you cannot confirm new orders. <Link to="/seller/balance" className="font-semibold underline">See how to pay</Link></Alert></div>
+        <div className="mb-4"><Alert tone="error">Your unpaid commission is over the limit, so you cannot confirm new cash orders. <Link to="/seller/balance" className="font-semibold underline">See how to pay</Link></Alert></div>
       )}
       {summary.data && (
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -29,7 +29,7 @@ export function SellerOrders() {
           <Link to="/seller/balance" className="card p-4 hover:border-brand-300"><p className="text-sm text-stone-600">Commission you owe</p><p className="text-2xl font-bold">{formatETB(Math.max(0, summary.data.data.balance.balance_santim)) || 'ETB 0'}</p></Link>
         </div>
       )}
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-stone-200" role="tablist">
+      <div className="mb-4 flex gap-1 relative overflow-x-auto border-b border-stone-200" role="tablist">
         {TABS.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={status === t} onClick={() => setParams(t ? { status: t } : {})}
             className={`shrink-0 border-b-2 px-3 py-2 text-sm font-medium ${status === t ? 'border-brand-700 text-brand-800' : 'border-transparent text-stone-600 hover:text-stone-900'}`}>
@@ -123,13 +123,19 @@ export function SellerOrderDetail() {
           {steps.map((s, i) => (
             <button key={s} type="button" className={i === 0 ? 'btn-primary' : 'btn-secondary'}
               onClick={() => call(api.post(`/seller/orders/${o.id}/status`, { status: s }))}>
-              {orderActionLabel(s, o.fulfillment)}
+              {orderActionLabel(s, o.fulfillment, o.payment_method)}
             </button>
           ))}
         </div>
       )}
-      {steps.includes('delivered') && <p className="text-xs text-stone-500">Use "{orderActionLabel('delivered', o.fulfillment)}" only after the customer has the furniture and you have the cash. Later steps can be skipped.</p>}
-      {canCancel && <CancelForm onCancel={(reason) => call(api.post(`/seller/orders/${o.id}/cancel`, { reason }))} hint="Reserved stock goes back to your listing. The customer sees your reason." />}
+      {steps.includes('delivered') && (
+        <p className="text-xs text-stone-500">
+          {o.payment_method === 'online'
+            ? `Paid online: do not collect cash. Use "${orderActionLabel('delivered', o.fulfillment, 'online')}" once the customer has the furniture; the marketplace then owes you this sale minus commission.`
+            : `Use "${orderActionLabel('delivered', o.fulfillment)}" only after the customer has the furniture and you have the cash.`} Later steps can be skipped.
+        </p>
+      )}
+      {canCancel && <CancelForm onCancel={(reason) => call(api.post(`/seller/orders/${o.id}/cancel`, { reason }))} hint={o.payment_method === 'online' ? 'Reserved stock goes back to your listing. The customer paid online and gets a full refund. The customer sees your reason.' : 'Reserved stock goes back to your listing. The customer sees your reason.'} />}
     </div>
   )
 

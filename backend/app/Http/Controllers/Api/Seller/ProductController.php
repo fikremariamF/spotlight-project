@@ -10,6 +10,7 @@ use App\Http\Requests\ProductRequest;
 use App\Http\Resources\ManagedProductResource;
 use App\Models\Product;
 use App\Models\SellerProfile;
+use App\Services\Alerts;
 use App\Services\AuditLogger;
 use App\Services\ProductImageService;
 use App\Support\Slug;
@@ -79,6 +80,9 @@ class ProductController extends Controller
             $this->images->storeMany($product, $request->file('images', []));
 
             $audit->log('product.created', $product, ['status' => $product->status->value]);
+            if ($submit) {
+                app(Alerts::class)->listingSubmitted($product);
+            }
 
             return $product;
         });
@@ -128,6 +132,9 @@ class ProductController extends Controller
             if ($changed) {
                 $audit->log('product.updated', $product, ['fields' => $changed, 'sent_to_review' => $needsReview]);
             }
+            if ($needsReview) {
+                app(Alerts::class)->listingSubmitted($product);
+            }
         });
 
         return new ManagedProductResource($product->fresh(['images', 'category:id,name,slug']));
@@ -154,6 +161,7 @@ class ProductController extends Controller
         $product->status = ProductStatus::PendingReview;
         $product->save();
         $audit->log('product.submitted', $product);
+        app(Alerts::class)->listingSubmitted($product);
 
         return new ManagedProductResource($product->load(['images', 'category:id,name,slug']));
     }

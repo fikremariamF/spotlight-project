@@ -6,6 +6,7 @@ use App\Enums\SellerStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\SellerProfileResource;
 use App\Models\SellerProfile;
+use App\Services\Alerts;
 use App\Services\AuditLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -56,7 +57,7 @@ class SellerController extends Controller
         return new SellerProfileResource($seller->load(['user:id,name,email', 'city', 'area'])->loadCount('products'));
     }
 
-    public function review(Request $request, SellerProfile $seller, string $action, AuditLogger $audit): SellerProfileResource
+    public function review(Request $request, SellerProfile $seller, string $action, AuditLogger $audit, Alerts $alerts): SellerProfileResource
     {
         abort_unless(isset(self::TRANSITIONS[$action]), 404);
         [$from, $to, $reasonRequired] = self::TRANSITIONS[$action];
@@ -65,7 +66,7 @@ class SellerController extends Controller
             'reason' => [$reasonRequired ? 'required' : 'nullable', 'string', 'max:500'],
         ]);
 
-        DB::transaction(function () use ($seller, $from, $to, $action, $data, $request, $audit) {
+        DB::transaction(function () use ($seller, $from, $to, $action, $data, $request, $audit, $alerts) {
             // Re-read under lock so two admins acting at once cannot apply conflicting transitions.
             $locked = SellerProfile::whereKey($seller->id)->lockForUpdate()->firstOrFail();
 
@@ -87,6 +88,7 @@ class SellerController extends Controller
                 'to' => $to->value,
                 'reason' => $data['reason'] ?? null,
             ]);
+            $alerts->sellerReviewed($locked, $action, $data['reason'] ?? null);
 
             $seller->setRawAttributes($locked->getAttributes(), true);
         });

@@ -9,6 +9,7 @@ use App\Http\Resources\UserResource;
 use App\Models\Area;
 use App\Models\SellerProfile;
 use App\Models\User;
+use App\Services\Alerts;
 use App\Services\AuditLogger;
 use App\Support\Slug;
 use Illuminate\Http\JsonResponse;
@@ -98,6 +99,7 @@ class AuthController extends Controller
             $user->sellerProfile()->save($profile);
 
             $audit->log('seller.applied', $profile, ['user_id' => $user->id]);
+            app(Alerts::class)->sellerApplied($profile);
 
             return $user;
         });

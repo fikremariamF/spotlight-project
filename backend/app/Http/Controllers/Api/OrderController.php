@@ -9,6 +9,8 @@ use App\Models\Checkout;
 use App\Models\Order;
 use App\Models\Setting;
 use App\Services\OrderService;
+use App\Services\PaymentService;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -19,7 +21,10 @@ use Illuminate\Validation\ValidationException;
  */
 class OrderController extends Controller
 {
-    public function __construct(private readonly OrderService $orders) {}
+    public function __construct(
+        private readonly OrderService $orders,
+        private readonly PaymentService $payments,
+    ) {}
 
     public function checkout(Request $request): JsonResponse
     {
@@ -30,7 +35,7 @@ class OrderController extends Controller
 
         $data = $request->validate([
             'address_id' => ['required', 'integer'],
-            'payment_method' => ['required', Rule::in(['cod'])],
+            'payment_method' => ['required', Rule::in(['cod', 'online'])],
             'fulfillment' => ['nullable', 'array'],
             'fulfillment.*' => [Rule::in(['delivery', 'pickup'])],
             'expected_total_santim' => ['required', 'integer', 'min:0'],
@@ -38,6 +43,9 @@ class OrderController extends Controller
         ]);
         if ($data['payment_method'] === 'cod' && ! Setting::codEnabled()) {
             throw ValidationException::withMessages(['payment_method' => 'Cash on delivery is not available right now.']);
+        }
+        if ($data['payment_method'] === 'online' && ! $this->payments->available()) {
+            throw ValidationException::withMessages(['payment_method' => 'Online payment is not available right now.']);
         }
 
         $user = $request->user();
@@ -51,7 +59,18 @@ class OrderController extends Controller
             $data['expected_total_santim'], isset($data['note']) ? trim($data['note']) ?: null : null,
         );
 
-        return response()->json(['data' => $this->checkoutPayload($checkout)], $created ? 201 : 200);
+        $payload = $this->checkoutPayload($checkout);
+        if ($checkout->isOnline()) {
+            // The orders exist even if the provider is down; the customer can retry from the order page.
+            try {
+                $payload['payment'] = PaymentController::state($checkout->fresh(), $this->payments->start($checkout));
+            } catch (HttpResponseException|ValidationException $e) {
+                $payload['payment'] = PaymentController::state($checkout->fresh(), null);
+                $payload['payment_error'] = $e instanceof ValidationException ? collect($e->errors())->flatten()->first() : ($e->getResponse()->getData(true)['message'] ?? 'Could not open the payment page.');
+            }
+        }
+
+        return response()->json(['data' => $payload], $created ? 201 : 200);
     }
 
     public function index(Request $request)
@@ -74,7 +93,13 @@ class OrderController extends Controller
     public function cancel(Request $request, int $id): OrderResource
     {
         $data = $request->validate(['reason' => ['required', 'string', 'min:3', 'max:500']]);
-        Order::where('customer_id', $request->user()->id)->findOrFail($id);
+        $order = Order::where('customer_id', $request->user()->id)->findOrFail($id);
+        if ($order->status === OrderStatus::AwaitingPayment) {
+            // Unpaid online orders are cancelled together: one payment covers the whole checkout.
+            $this->payments->cancelUnpaid($order->checkout, 'customer', $request->user(), trim($data['reason']));
+
+            return self::detail($order->fresh(), 'customer');
+        }
         $order = $this->orders->transition($id, OrderStatus::Cancelled, $request->user(), 'customer', trim($data['reason']));
 
         return self::detail($order, 'customer');
@@ -82,7 +107,7 @@ class OrderController extends Controller
 
     public static function detail(Order $order, string $viewer): OrderResource
     {
-        $order->load(['seller.area', 'customer', 'checkout', 'items.product.primaryImage', 'items.review', 'history']);
+        $order->load(['seller.area', 'customer', 'checkout', 'items.product.primaryImage', 'items.review', 'history', 'refund']);
 
         return (new OrderResource($order))->as($viewer);
     }

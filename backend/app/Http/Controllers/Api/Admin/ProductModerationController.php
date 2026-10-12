@@ -6,6 +6,7 @@ use App\Enums\ProductStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ManagedProductResource;
 use App\Models\Product;
+use App\Services\Alerts;
 use App\Services\AuditLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -89,6 +90,7 @@ class ProductModerationController extends Controller
             $product->save();
 
             $audit->log("product.{$action}", $product, ['from' => $previous->value, 'to' => $to->value, 'note' => $data['note'] ?? null]);
+            app(Alerts::class)->listingReviewed($product, $action, $data['note'] ?? null);
 
             return $product;
         });

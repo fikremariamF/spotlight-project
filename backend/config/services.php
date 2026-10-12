@@ -18,6 +18,14 @@ return [
         'key' => env('POSTMARK_API_KEY'),
     ],
 
+    // SMS provider for order alerts (MARKETPLACE_SMS_DRIVER=afromessage). Keep the token out of git.
+    'afromessage' => [
+        'base_url' => env('AFROMESSAGE_BASE_URL', 'https://api.afromessage.com/api'),
+        'token' => env('AFROMESSAGE_TOKEN'),
+        'identifier_id' => env('AFROMESSAGE_IDENTIFIER_ID'),
+        'sender' => env('AFROMESSAGE_SENDER'),
+    ],
+
     'resend' => [
         'key' => env('RESEND_API_KEY'),
     ],
@@ -33,6 +41,15 @@ return [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
+    ],
+
+    // Online payments. Keys come from the Chapa dashboard (Settings > API); test keys start with
+    // CHASECK_TEST. The webhook secret is the "Secret hash" set for the webhook in the same place.
+    'chapa' => [
+        'secret_key' => env('CHAPA_SECRET_KEY'),
+        'webhook_secret' => env('CHAPA_WEBHOOK_SECRET'),
+        'base_url' => env('CHAPA_BASE_URL', 'https://api.chapa.co/v1'),
+        'timeout' => (int) env('CHAPA_TIMEOUT', 15),
     ],
 
 ];

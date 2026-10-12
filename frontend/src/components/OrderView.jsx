@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ProductImage } from './ProductCard'
-import { ORDER_STATUS_TONES, formatDateTime, formatETB, orderStatusLabel } from '../lib/format'
+import { ORDER_STATUS_TONES, formatDateTime, formatETB, orderStatusLabel, paymentSummary } from '../lib/format'
 
 export function OrderStatusBadge({ order }) {
   return (
@@ -10,7 +10,7 @@ export function OrderStatusBadge({ order }) {
   )
 }
 
-const BY = { customer: 'Customer', seller: 'Seller', admin: 'Marketplace team' }
+const BY = { customer: 'Customer', seller: 'Seller', admin: 'Marketplace team', system: 'The marketplace' }
 
 /**
  * Order detail shared by customer, seller and admin pages. `actions` renders the viewer's buttons.
@@ -87,7 +87,14 @@ export default function OrderView({ order, viewer, actions, itemExtra }) {
           <div className="flex justify-between"><span>Items</span><span>{formatETB(order.items_total_santim)}</span></div>
           <div className="flex justify-between gap-2"><span>{order.fulfillment === 'pickup' ? 'Fulfilment' : 'Delivery'}</span><span className="text-right">{feeText}</span></div>
           <div className="flex justify-between border-t border-stone-100 pt-2 text-base font-bold"><span>Total</span><span>{formatETB(order.total_santim)}</span></div>
-          <p className="pt-1 text-xs text-stone-500">Cash on delivery · {order.payment_status === 'paid' ? 'paid' : 'not paid yet'}</p>
+          <p className="pt-1 text-xs text-stone-500">{paymentSummary(order)}</p>
+          {order.refund && (
+            <p className={`mt-1 rounded-lg p-2 text-xs ${order.refund.status === 'refunded' ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
+              {order.refund.status === 'refunded'
+                ? `Refunded ${formatETB(order.refund.amount_santim)} on ${formatDateTime(order.refund.refunded_at)}${order.refund.reference ? ` (ref ${order.refund.reference})` : ''}.`
+                : `Refund of ${formatETB(order.refund.amount_santim)} on the way. The marketplace team sends it back to how you paid.`}
+            </p>
+          )}
           {viewer !== 'customer' && order.commission_santim !== undefined && (
             <p className="text-xs text-stone-500">Commission {order.commission_rate_percent}% on items: {formatETB(order.commission_santim)}</p>
           )}

@@ -109,6 +109,7 @@ if (-not (Test-Path '.env')) {
     $envText = $envText -replace '(?m)^DEMO_USER_PASSWORD=[^\r\n]*', "DEMO_USER_PASSWORD=$DemoPassword"
     $envText = $envText -replace '(?m)^APP_URL=[^\r\n]*', "APP_URL=http://localhost:$WebPort"
     $envText = $envText -replace '(?m)^CORS_ALLOWED_ORIGINS=[^\r\n]*', "CORS_ALLOWED_ORIGINS=http://localhost:$WebPort"
+    $envText = $envText -replace '(?m)^MARKETPLACE_PAYMENT_GATEWAY=[^\r\n]*', 'MARKETPLACE_PAYMENT_GATEWAY=fake'
     Write-Text (Join-Path $Backend '.env') $envText
     Invoke-Checked 'php' @('artisan', 'key:generate', '--no-interaction')
 } else {
@@ -132,6 +133,8 @@ if ((& php $Helper user-exists customer@demo.local) -ne 'yes') {
     Invoke-Checked 'php' @('artisan', 'db:seed', '--class=DemoSeeder', '--no-interaction')
 } else {
     Write-Host 'Demo sellers and listings already there'
+    # Older demo data has plain colored pictures; swap them for drawn furniture (demo pictures only).
+    Invoke-Checked 'php' @('artisan', 'marketplace:demo-pictures', '--no-interaction')
 }
 if ((& php $Helper user-exists $AdminEmail) -ne 'yes') {
     Step 'Backend: adding the demo admin'
@@ -148,11 +151,23 @@ if (-not (Test-Path '.env')) {
 Invoke-Checked 'npm.cmd' @('install', '--no-fund', '--no-audit')
 
 Step 'Starting'
+# Online payment uses the test payment page locally, unless your .env picks a gateway.
+if (-not (Select-String -Path (Join-Path $Backend '.env') -Pattern '^MARKETPLACE_PAYMENT_GATEWAY=' -Quiet)) {
+    $env:MARKETPLACE_PAYMENT_GATEWAY = 'fake'
+}
 # --no-reload keeps PHPRC for the server process; plain "artisan serve" would drop it.
 $apiLog = Join-Path $Backend 'storage\logs\serve.log'
 $api = Start-Process -FilePath 'php' -ArgumentList @('artisan', 'serve', '--no-reload', "--port=$ApiPort") `
     -WorkingDirectory $Backend -NoNewWindow -PassThru `
     -RedirectStandardOutput $apiLog -RedirectStandardError (Join-Path $Backend 'storage\logs\serve-error.log')
+# Sends queued email and SMS alerts (both only logged locally).
+$queue = Start-Process -FilePath 'php' -ArgumentList @('artisan', 'queue:work', '--sleep=1', '--tries=3') `
+    -WorkingDirectory $Backend -NoNewWindow -PassThru `
+    -RedirectStandardOutput (Join-Path $Backend 'storage\logs\queue.log') -RedirectStandardError (Join-Path $Backend 'storage\logs\queue-error.log')
+# Cancels online orders that were not paid in time and releases their stock.
+$schedule = Start-Process -FilePath 'php' -ArgumentList @('artisan', 'schedule:work') `
+    -WorkingDirectory $Backend -NoNewWindow -PassThru `
+    -RedirectStandardOutput (Join-Path $Backend 'storage\logs\schedule.log') -RedirectStandardError (Join-Path $Backend 'storage\logs\schedule-error.log')
 try {
     Write-Host ''
     Write-Host "  Open http://localhost:$WebPort" -ForegroundColor Green
@@ -161,6 +176,8 @@ try {
     Write-Host "  Sellers    seller1@demo.local to seller4@demo.local   $DemoPassword"
     Write-Host "  Admin      $AdminEmail        $AdminPassword"
     Write-Host ''
+    Write-Host '  Emails are written to backend\storage\logs\laravel.log; text messages show in Admin > Text messages.'
+    Write-Host '  Paying online opens a test payment page: no real money moves.'
     Write-Host '  API log: backend\storage\logs\serve.log. Press Ctrl+C to stop.'
     Write-Host ''
     & npm.cmd run dev -- --port $WebPort --strictPort
@@ -168,5 +185,11 @@ try {
     if ($api -and -not $api.HasExited) {
         # artisan serve starts php -S as a child process; stop the whole tree.
         try { & taskkill.exe /PID $api.Id /T /F *> $null } catch { }
+    }
+    if ($queue -and -not $queue.HasExited) {
+        try { & taskkill.exe /PID $queue.Id /T /F *> $null } catch { }
+    }
+    if ($schedule -and -not $schedule.HasExited) {
+        try { & taskkill.exe /PID $schedule.Id /T /F *> $null } catch { }
     }
 }

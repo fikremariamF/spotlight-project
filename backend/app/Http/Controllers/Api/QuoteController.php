@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\QuoteResource;
 use App\Models\Conversation;
 use App\Models\Quote;
+use App\Services\Alerts;
 use App\Services\AuditLogger;
 use App\Services\ConversationService;
 use App\Support\Money;
@@ -27,6 +28,7 @@ class QuoteController extends Controller
     public function __construct(
         private readonly ConversationService $conversations,
         private readonly AuditLogger $audit,
+        private readonly Alerts $alerts,
     ) {}
 
     public function store(Request $request, int $conversationId): JsonResponse
@@ -71,6 +73,7 @@ class QuoteController extends Controller
             $this->conversations->post($conversation, $request->user(), 'seller',
                 'Sent a quote: '.$quote->title.' for ETB '.Money::toBirr($quote->totalSantim()).' in total.', $quote);
             $this->audit->log('quote.sent', $quote, ['conversation_id' => $conversation->id, 'total_santim' => $quote->totalSantim()]);
+            $this->alerts->quoteSent($quote);
 
             return $quote;
         });
@@ -133,6 +136,9 @@ class QuoteController extends Controller
                 $this->conversations->post($conversation, $request->user(), $side, $verb.': '.$quote->title.'.', $quote);
             }
             $this->audit->log('quote.'.$to->value, $quote, ['conversation_id' => $conversation->id]);
+            if ($to === QuoteStatus::Accepted || $to === QuoteStatus::Declined) {
+                $this->alerts->quoteAnswered($quote, $to->value);
+            }
 
             return $quote;
         });

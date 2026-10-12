@@ -1,16 +1,20 @@
 <?php
 
+use App\Http\Controllers\Api\Account\AlertSettingsController;
+use App\Http\Controllers\Api\Account\ProfileController;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\DeliveryZoneController;
 use App\Http\Controllers\Api\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Api\Admin\PaymentController as AdminPaymentController;
 use App\Http\Controllers\Api\Admin\ProductModerationController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Admin\ReviewController as AdminReviewController;
 use App\Http\Controllers\Api\Admin\SellerController as AdminSellerController;
 use App\Http\Controllers\Api\Admin\SettingsController;
 use App\Http\Controllers\Api\Admin\SettlementController;
+use App\Http\Controllers\Api\Admin\SmsLogController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CartController;
@@ -18,7 +22,9 @@ use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\DeliveryController;
 use App\Http\Controllers\Api\FavoriteController;
+use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\Seller\BalanceController;
@@ -27,6 +33,10 @@ use App\Http\Controllers\Api\Seller\ProductController as SellerProductController
 use App\Http\Controllers\Api\Seller\ProfileController as SellerProfileController;
 use App\Http\Controllers\Api\Seller\ReviewController as SellerReviewController;
 use App\Models\Setting;
+use App\Payments\ChapaGateway;
+use App\Payments\FakeGateway;
+use App\Payments\PaymentGateway;
+use App\Services\PaymentService;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/config', fn () => response()->json([
@@ -36,7 +46,18 @@ Route::get('/config', fn () => response()->json([
     'max_image_kb' => config('marketplace.products.max_image_kb'),
     'show_seller_phone' => config('marketplace.contact.show_seller_phone'),
     'cod_enabled' => Setting::codEnabled(),
+    'online_payments' => [
+        'available' => app(PaymentService::class)->available(),
+        'test_mode' => (fn ($g) => $g instanceof FakeGateway || ($g instanceof ChapaGateway && $g->testMode()))(app(PaymentGateway::class)),
+        'window_minutes' => max(5, (int) config('marketplace.payments.window_minutes')),
+    ],
 ]));
+
+// Payment provider calls. They only prompt a check with the provider, so they need no sign-in.
+Route::middleware('throttle:payment-callbacks')->group(function () {
+    Route::get('/payments/chapa/callback', [PaymentController::class, 'chapaCallback']);
+    Route::post('/payments/chapa/webhook', [PaymentController::class, 'chapaWebhook']);
+});
 
 // Public catalog
 Route::middleware('throttle:catalog')->group(function () {
@@ -70,6 +91,19 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
     Route::get('/favorites', [FavoriteController::class, 'index']);
     Route::post('/favorites/{product}', [FavoriteController::class, 'store']);
     Route::delete('/favorites/{product}', [FavoriteController::class, 'destroy']);
+
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markRead'])->whereUuid('id');
+
+    Route::get('/account/profile', [ProfileController::class, 'show']);
+    Route::put('/account/profile', [ProfileController::class, 'update']);
+    Route::put('/account/password', [ProfileController::class, 'password']);
+    Route::post('/account/sign-out-others', [ProfileController::class, 'signOutOthers']);
+
+    Route::get('/account/alerts', [AlertSettingsController::class, 'show']);
+    Route::put('/account/alerts', [AlertSettingsController::class, 'update']);
 });
 
 // Customers only
@@ -95,6 +129,12 @@ Route::middleware(['auth:sanctum', 'role:customer'])->group(function () {
     Route::get('/orders', [OrderController::class, 'index']);
     Route::get('/orders/{id}', [OrderController::class, 'show'])->whereNumber('id');
     Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel'])->whereNumber('id');
+    Route::post('/checkouts/{id}/pay', [PaymentController::class, 'pay'])->whereNumber('id')->middleware('throttle:checkout');
+    Route::get('/checkouts/{id}/payment', [PaymentController::class, 'status'])->whereNumber('id');
+    Route::post('/checkouts/{id}/cancel', [PaymentController::class, 'cancel'])->whereNumber('id');
+    // Test payment page (MARKETPLACE_PAYMENT_GATEWAY=fake). Answers 404 with any other gateway.
+    Route::get('/payments/test/{txRef}', [PaymentController::class, 'testShow']);
+    Route::post('/payments/test/{txRef}', [PaymentController::class, 'testOutcome']);
     Route::post('/orders/{orderId}/items/{itemId}/review', [ReviewController::class, 'store'])->whereNumber(['orderId', 'itemId']);
     Route::put('/reviews/{id}', [ReviewController::class, 'update'])->whereNumber('id');
 });
@@ -173,6 +213,11 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'role:admin'])->group(functi
     Route::get('/settlements/{seller}', [SettlementController::class, 'show']);
     Route::post('/settlements/{seller}/payments', [SettlementController::class, 'payment']);
     Route::post('/settlements/{seller}/adjustments', [SettlementController::class, 'adjust']);
+    Route::post('/settlements/{seller}/payouts', [SettlementController::class, 'payout']);
+
+    Route::get('/payments', [AdminPaymentController::class, 'index']);
+    Route::get('/refunds', [AdminPaymentController::class, 'refunds']);
+    Route::post('/refunds/{id}/complete', [AdminPaymentController::class, 'completeRefund'])->whereNumber('id');
 
     Route::get('/reviews', [AdminReviewController::class, 'index']);
     Route::post('/reviews/{id}/hide', [AdminReviewController::class, 'hide'])->whereNumber('id');
@@ -187,4 +232,5 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'role:admin'])->group(functi
 
     Route::get('/settings', [SettingsController::class, 'show']);
     Route::put('/settings', [SettingsController::class, 'update']);
+    Route::get('/sms', [SmsLogController::class, 'index']);
 });

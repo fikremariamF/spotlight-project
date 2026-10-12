@@ -4,6 +4,7 @@ import { ProductImage } from '../components/ProductCard'
 import { Alert, EmptyState, ErrorState, Field, PageHeader, Pagination, Spinner } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
+import { usePaymentWording } from '../context/ConfigContext'
 import { useInbox } from '../context/InboxContext'
 import { api, parseError } from '../lib/api'
 import { INQUIRY_TYPES, QUOTE_STATUS_LABELS, formatETB, timeAgo, toQuery } from '../lib/format'
@@ -38,7 +39,7 @@ export function Inbox() {
     <div className="container-page py-8">
       <PageHeader title="Messages"
         subtitle={isSeller ? 'Questions, price offers and custom requests from customers.' : 'Your conversations with sellers.'} />
-      <div className="mb-4 flex gap-1 overflow-x-auto" role="tablist" aria-label="Filter conversations">
+      <div className="mb-4 flex gap-1 relative overflow-x-auto" role="tablist" aria-label="Filter conversations">
         {FILTERS.map(([key, label]) => (
           <button key={key} type="button" role="tab" aria-selected={filter === key}
             className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${filter === key ? 'bg-brand-700 text-white' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'}`}
@@ -150,6 +151,7 @@ function QuoteCard({ quote, side, onChanged }) {
 }
 
 function OrderQuote({ quote }) {
+  const pay = usePaymentWording()
   const { refreshCart } = useCart()
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
@@ -178,7 +180,7 @@ function OrderQuote({ quote }) {
       {error && <p className="mb-2 font-medium text-red-700">{error}</p>}
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn-primary" disabled={busy} onClick={add}>{busy ? 'Adding...' : 'Add to cart'}</button>
-        <span className="text-xs text-stone-600">Order by {new Date(quote.order_by).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}. Pay cash on delivery.</span>
+        <span className="text-xs text-stone-600">Order by {new Date(quote.order_by).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}. {pay.short}</span>
       </div>
     </div>
   )
