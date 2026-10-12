@@ -67,7 +67,13 @@ jobs:
           if (-not $cfg.online_payments.available) { throw 'online payment not available on a fresh run' }
           $cust = Invoke-RestMethod -Method Post http://localhost:5173/api/auth/login -ContentType 'application/json' -Body (@{ email = 'customer@demo.local'; password = 'Demo-pass-123' } | ConvertTo-Json)
           $h = @{ Authorization = "Bearer $($cust.token)"; Accept = 'application/json' }
-          $addr = (Invoke-RestMethod http://localhost:5173/api/addresses -Headers $h).data[0].id
+          # A fresh demo customer has no address yet; add one in the first sub-city, as a shopper would.
+          $addr = (Invoke-RestMethod http://localhost:5173/api/addresses -Headers $h).data | Select-Object -First 1 -ExpandProperty id
+          if (-not $addr) {
+            $area = (Invoke-RestMethod http://localhost:5173/api/areas).data[0]
+            $addr = (Invoke-RestMethod -Method Post http://localhost:5173/api/addresses -Headers $h -ContentType 'application/json' -Body (@{ recipient_name = 'Demo Customer'; phone = '+251911000111'; area_id = $area.id; address_line = 'House 1' } | ConvertTo-Json)).data.id
+          }
+          "address $addr"
           $picked = $null
           foreach ($p in $products.data) {
             $line = Invoke-RestMethod -Method Post http://localhost:5173/api/cart/items -Headers $h -ContentType 'application/json' -Body (@{ product_slug = $p.slug; quantity = 1 } | ConvertTo-Json)
