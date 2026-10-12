@@ -75,7 +75,7 @@ export default function AdminListings() {
                     {detail.data && (
                       <>
                         <div className="mb-3 flex gap-2 relative overflow-x-auto">
-                          {detail.data.data.images.map((img) => <img key={img.id} src={img.url} alt="" className="h-32 rounded-lg object-cover" />)}
+                          {detail.data.data.images.map((img) => <img key={img.id} src={img.thumb || img.url} alt="" className="h-32 rounded-lg object-cover" />)}
                         </div>
                         <p className="whitespace-pre-line text-stone-700">{detail.data.data.description}</p>
                         <p className="mt-2 text-stone-600">

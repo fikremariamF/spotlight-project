@@ -38,6 +38,9 @@ class DemoPicturesTest extends TestCase
         Storage::disk('public')->assertExists($photo->path);
         $this->assertSame("products/{$sofa->id}/demo-../../secret.jpg", $tricky->fresh()->path, 'odd paths are skipped');
         $this->assertSame('image/jpeg', getimagesizefromstring(Storage::disk('public')->get($redrawn))['mime']);
+        $copies = [$old->fresh()->thumb_path, $old->fresh()->large_path];
+        $this->assertNotContains(null, $copies, 'the redrawn picture gets its smaller copies');
+        Storage::disk('public')->assertExists($copies);
 
         $this->artisan('marketplace:demo-pictures')->expectsOutput('Demo pictures are up to date.')->assertSuccessful();
         $this->assertSame($redrawn, $old->fresh()->path);

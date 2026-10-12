@@ -248,7 +248,7 @@ export default function SellerProductForm() {
             <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4">
               {existingImages.map((img) => (
                 <li key={img.id} className="relative">
-                  <img src={img.url} alt="" className="aspect-square w-full rounded-lg object-cover" />
+                  <img src={img.thumb || img.url} alt="" className="aspect-square w-full rounded-lg object-cover" />
                   <button type="button" onClick={() => removeImage(img.id)} className="absolute top-1 right-1 rounded bg-white/90 px-2 py-0.5 text-xs font-semibold text-red-700">Remove</button>
                 </li>
               ))}

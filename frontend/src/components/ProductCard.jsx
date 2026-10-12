@@ -9,7 +9,8 @@ import { RatingSummary } from './Reviews'
 // Loaded on first use, so the catalog does not pay for the dialog up front.
 const QuickView = lazy(() => import('./QuickView'))
 
-export function ProductImage({ src, alt, className = '' }) {
+/** Lazy by default; `eager` is for the main picture at the top of a page, so it starts loading first. */
+export function ProductImage({ src, alt, className = '', eager = false }) {
   if (!src) {
     return (
       <div className={`flex flex-col items-center justify-center gap-1 bg-sand-100 text-xs text-stone-400 ${className}`} role="img" aria-label="No photo">
@@ -18,7 +19,10 @@ export function ProductImage({ src, alt, className = '' }) {
       </div>
     )
   }
-  return <img src={src} alt={alt} loading="lazy" decoding="async" className={`object-cover ${className}`} />
+  return (
+    <img src={src} alt={alt} loading={eager ? 'eager' : 'lazy'} fetchPriority={eager ? 'high' : undefined}
+      decoding="async" className={`object-cover ${className}`} />
+  )
 }
 
 function Badge({ tone, children }) {

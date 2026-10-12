@@ -38,7 +38,7 @@ export default function Gallery({ images, name, compact = false }) {
           <div className="flex touch-pan-y">
             {images.map((img, i) => (
               <div key={img.id} className="min-w-0 flex-[0_0_100%]" role="group" aria-roledescription="slide" aria-label={`${i + 1} of ${images.length}`}>
-                <ProductImage src={img.url} alt={img.alt || name} className="aspect-[4/3] w-full" />
+                <ProductImage src={img.url} alt={img.alt || name} className="aspect-[4/3] w-full" eager={i === 0 && !compact} />
               </div>
             ))}
           </div>
@@ -64,7 +64,7 @@ export default function Gallery({ images, name, compact = false }) {
           {images.map((img, i) => (
             <button key={img.id} type="button" onClick={() => go(i)} aria-label={`Show photo ${i + 1}`} aria-current={i === index}
               className={`shrink-0 overflow-hidden rounded-xl ring-2 transition ${i === index ? 'ring-brand-600' : 'opacity-70 ring-transparent hover:opacity-100'}`}>
-              <img src={img.url} alt="" className="size-20 object-cover" />
+              <img src={img.thumb || img.url} alt="" loading="lazy" decoding="async" className="size-20 object-cover" />
             </button>
           ))}
         </div>

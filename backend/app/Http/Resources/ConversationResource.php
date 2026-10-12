@@ -58,7 +58,7 @@ class ConversationResource extends JsonResource
                 'name' => $this->product->name,
                 'slug' => $this->product->slug,
                 'price_santim' => $this->product->price_santim,
-                'image' => $this->product->relationLoaded('primaryImage') ? $this->product->primaryImage?->url() : null,
+                'image' => $this->product->relationLoaded('primaryImage') ? $this->product->primaryImage?->thumbUrl() : null,
             ] : null),
             'last_message' => $this->whenLoaded('latestMessage', fn () => $this->latestMessage ? [
                 'body' => mb_strimwidth($this->latestMessage->body, 0, 140, '...'),

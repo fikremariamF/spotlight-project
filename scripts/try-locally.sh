@@ -86,6 +86,8 @@ else
   # Older demo data has plain colored pictures; swap them for drawn furniture (demo pictures only).
   php artisan marketplace:demo-pictures --no-interaction
 fi
+# Smaller copies of product photos for faster pages; only photos without them are processed.
+php artisan marketplace:image-variants --no-interaction
 if [ "$(user_exists "$ADMIN_EMAIL")" != "yes" ]; then
   step "Backend: adding the demo admin"
   printf '%s\n' "$ADMIN_PASSWORD" | php artisan marketplace:create-admin "$ADMIN_EMAIL" --name="Demo Admin"
@@ -97,6 +99,12 @@ if [ ! -f .env ]; then
   perl -pe 's{^VITE_DEV_API_TARGET=.*}{VITE_DEV_API_TARGET=http://127.0.0.1:'"$API_PORT"'}' .env.example > .env
 fi
 npm install --no-fund --no-audit
+# The site is built once and served as in production, which loads much faster than development
+# mode. TRY_DEV=1 runs the development server instead (instant reload when you edit the code).
+if [ "${TRY_DEV:-0}" != 1 ]; then
+  step "Frontend: building the site"
+  npm run build
+fi
 
 step "Starting"
 cd "$BACKEND"
@@ -127,4 +135,8 @@ cat <<EOF
 EOF
 
 cd "$FRONTEND"
-npm run dev -- --port "$WEB_PORT" --strictPort
+if [ "${TRY_DEV:-0}" = 1 ]; then
+  npm run dev -- --port "$WEB_PORT" --strictPort
+else
+  npm run preview -- --port "$WEB_PORT" --strictPort
+fi

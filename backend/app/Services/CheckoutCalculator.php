@@ -111,7 +111,7 @@ class CheckoutCalculator
             'kind' => 'product',
             'product' => [
                 'id' => $p->id, 'slug' => $p->slug, 'name' => $p->name,
-                'image' => $p->relationLoaded('primaryImage') ? $p->primaryImage?->url() : null,
+                'image' => $p->relationLoaded('primaryImage') ? $p->primaryImage?->thumbUrl() : null,
                 'stock_type' => $p->stock_type->value, 'production_days' => $p->production_days,
             ],
             'quote' => null,

@@ -11,6 +11,8 @@ use Illuminate\Validation\ValidationException;
 
 class ProductImageService
 {
+    public function __construct(private ImageVariants $variants) {}
+
     /**
      * Store uploaded images under a random file name (never the client's name).
      *
@@ -45,7 +47,10 @@ class ProductImageService
                         throw new \RuntimeException('Image could not be saved.');
                     }
                     $stored[] = $path;
-                    $product->images()->create(['path' => $path, 'sort_order' => $next++, 'alt' => $product->name]);
+                    // Without copies the original is shown, so a failure here never blocks the upload.
+                    $copies = $this->variants->make($path);
+                    array_push($stored, ...array_values($copies));
+                    $product->images()->create(['path' => $path, ...$copies, 'sort_order' => $next++, 'alt' => $product->name]);
                 }
             } catch (\Throwable $e) {
                 // Do not leave orphaned files when the database write fails.
@@ -57,8 +62,8 @@ class ProductImageService
 
     public function delete(ProductImage $image): void
     {
-        $path = $image->path;
+        $files = $image->files();
         $image->delete();
-        Storage::disk('public')->delete($path);
+        Storage::disk('public')->delete($files);
     }
 }

@@ -63,10 +63,11 @@ class ProductResource extends JsonResource
                 'slug' => $this->seller->slug,
                 'area' => $this->seller->relationLoaded('area') ? $this->seller->area?->name : null,
             ]),
-            'image' => $this->whenLoaded('primaryImage', fn () => $this->primaryImage?->url()),
+            'image' => $this->whenLoaded('primaryImage', fn () => $this->primaryImage?->thumbUrl()),
             'images' => $this->whenLoaded('images', fn () => $this->images->map(fn ($img) => [
                 'id' => $img->id,
                 'url' => $img->url(),
+                'thumb' => $img->thumbUrl(),
                 'alt' => $img->alt,
                 'sort_order' => $img->sort_order,
             ])->values()),

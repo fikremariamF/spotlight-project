@@ -14,7 +14,7 @@ Milestone 1 (foundation and catalog), milestone 2 (in-app inquiries, custom quot
 
 ## Requirements
 
-- PHP 8.3+ with `pdo_mysql`, `mbstring`, `gd`, `fileinfo`, `intl`
+- PHP 8.3+ with `pdo_mysql`, `mbstring`, `gd`, `exif`, `fileinfo`, `intl`
 - Composer 2
 - Node 22+ and npm
 - MySQL 8 or MariaDB 10.6+ (SQLite works for quick local tries and is used by the test suite)
@@ -33,7 +33,7 @@ winget install -e --id OpenJS.NodeJS.LTS
 powershell -ExecutionPolicy Bypass -File scripts\try-locally.ps1
 ```
 
-It uses SQLite (no MySQL needed), adds demo sellers, listings and an admin, starts both servers and prints the logins. Open http://localhost:5173 and press Ctrl+C to stop. Running it again keeps your data (and redraws old plain demo pictures as furniture). Paying online opens a test payment page where you choose whether the payment goes through; no real money moves. The demo passwords are public, so use it on your own computer only.
+It uses SQLite (no MySQL needed), adds demo sellers, listings and an admin, builds the site, starts both servers and prints the logins. Open http://localhost:5173 and press Ctrl+C to stop. The site is served as built for production, which loads several times faster than development mode; set `TRY_DEV=1` first (`$env:TRY_DEV=1` in PowerShell) for the development server with instant reload while you edit code. Running it again keeps your data (and redraws old plain demo pictures as furniture). Paying online opens a test payment page where you choose whether the payment goes through; no real money moves. The demo passwords are public, so use it on your own computer only.
 
 ## Local setup
 
@@ -79,7 +79,9 @@ npm run build                    # production build into dist/
 - Build the frontend (`npm run build`) and serve `frontend/dist` as static files, with every unknown path falling back to `index.html`.
 - Serve the API from the same domain under `/api` (recommended), or set `VITE_API_URL` at build time and list the frontend origin in `CORS_ALLOWED_ORIGINS`.
 - Production `.env`: `APP_ENV=production`, `APP_DEBUG=false`, a real `APP_URL`, strong DB credentials, HTTPS only.
-- Run `php artisan migrate --force`, `php artisan config:cache`, `php artisan route:cache` on each deploy.
+- Run `php artisan migrate --force` and `php artisan optimize` (caches config, routes, events and views) on each deploy.
+- Speed: run PHP under PHP-FPM with OPcache on (`opcache.enable=1`, `opcache.memory_consumption=128`, `opcache.max_accelerated_files=20000`; with `opcache.validate_timestamps=0` restart PHP-FPM on each deploy). Turn on gzip or Brotli in the web server for HTML, CSS, JS and JSON, and send `Cache-Control: public, max-age=31536000, immutable` for `frontend/dist/assets/` (file names change on every build) but not for `index.html`.
+- Product photos: uploads get a thumbnail (640 px) for cards and lists and a large copy (1600 px) for the product page, WebP when PHP's GD supports it, with location and other photo data removed. Needs the `gd` and `exif` PHP extensions (without `exif`, JPEG photos keep using the original). After the first deploy of this version run `php artisan marketplace:image-variants` once to make copies of photos uploaded earlier; running it again only handles photos still without copies.
 - Run a queue worker all the time (for example under systemd or Supervisor): `php artisan queue:work --tries=3 --max-time=3600`. Emails and text messages are sent by the worker; without it they wait in the `jobs` table. In-app alerts do not need it. Restart it on each deploy with `php artisan queue:restart`.
 - Email: set `MAIL_MAILER` and the `MAIL_*` settings for your mail provider, and `MAIL_FROM_ADDRESS`. With the default `log` mailer, emails are only written to `storage/logs/laravel.log`.
 - Run the scheduler: a cron entry `* * * * * cd /path/to/backend && php artisan schedule:run >> /dev/null 2>&1`. It cancels online orders that were not paid in time (every five minutes) and releases their stock. Without it, unpaid orders hold stock until someone cancels them.

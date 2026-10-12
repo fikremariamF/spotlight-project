@@ -84,7 +84,7 @@ class OrderResource extends JsonResource
                 'id' => $i->id,
                 'name' => $i->name,
                 'product_slug' => $i->relationLoaded('product') ? $i->product?->slug : null,
-                'image' => $i->relationLoaded('product') && $i->product?->relationLoaded('primaryImage') ? $i->product->primaryImage?->url() : null,
+                'image' => $i->relationLoaded('product') && $i->product?->relationLoaded('primaryImage') ? $i->product->primaryImage?->thumbUrl() : null,
                 'quote_id' => $i->quote_id,
                 'unit_price_santim' => $i->unit_price_santim,
                 'quantity' => $i->quantity,

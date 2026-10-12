@@ -9,6 +9,7 @@ use App\Models\DeliveryZone;
 use App\Models\Product;
 use App\Models\SellerProfile;
 use App\Models\User;
+use App\Services\ImageVariants;
 use App\Support\Slug;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Storage;
@@ -144,7 +145,7 @@ class DemoSeeder extends Seeder
 
             $path = "products/{$product->id}/".self::ART_PREFIX.Str::random(8).'.jpg';
             Storage::disk('public')->put($path, (new DemoFurnitureArt)->jpeg($name, $color, $i));
-            $product->images()->create(['path' => $path, 'alt' => $name, 'sort_order' => 0]);
+            $product->images()->create(['path' => $path, ...app(ImageVariants::class)->make($path), 'alt' => $name, 'sort_order' => 0]);
         }
 
         // Example zones so delivery estimates show something locally. The fees are made up;

@@ -4,6 +4,7 @@ use App\Enums\Role;
 use App\Models\AuditLog;
 use App\Models\ProductImage;
 use App\Models\User;
+use App\Services\ImageVariants;
 use App\Services\PaymentService;
 use Database\Seeders\DemoFurnitureArt;
 use Database\Seeders\DemoSeeder;
@@ -46,7 +47,7 @@ Artisan::command('marketplace:create-admin {email} {--name=Administrator}', func
     return 0;
 })->purpose('Create or promote a marketplace administrator');
 
-Artisan::command('marketplace:demo-pictures', function () {
+Artisan::command('marketplace:demo-pictures', function (ImageVariants $variants) {
     // Only pictures the demo seeder generated (products/{id}/demo-*.jpg); seller photos are never touched.
     $images = ProductImage::query()
         ->where('path', 'like', 'products/%/demo-%')
@@ -63,8 +64,8 @@ Artisan::command('marketplace:demo-pictures', function () {
         }
         $new = "products/{$image->product_id}/".DemoSeeder::ART_PREFIX.Str::random(8).'.jpg';
         Storage::disk('public')->put($new, $art->jpeg($image->product->name, $image->product->color, $image->product_id));
-        $old = $image->path;
-        $image->forceFill(['path' => $new])->save();
+        $old = $image->files();
+        $image->forceFill(['path' => $new, 'thumb_path' => null, 'large_path' => null, ...$variants->make($new)])->save();
         Storage::disk('public')->delete($old);
         $redrawn++;
     }
@@ -73,6 +74,34 @@ Artisan::command('marketplace:demo-pictures', function () {
 
     return 0;
 })->purpose('Replace the old plain demo pictures with drawn furniture (demo data only)');
+
+Artisan::command('marketplace:image-variants {--all : Remake the copies of every photo, not only photos without them}', function (ImageVariants $variants) {
+    // Safe to run again: by default only photos that have no smaller copies yet are processed.
+    $query = ProductImage::query()->orderBy('id');
+    if (! $this->option('all')) {
+        $query->whereNull('thumb_path');
+    }
+
+    $made = 0;
+    $failed = [];
+    $query->chunkById(100, function ($images) use ($variants, &$made, &$failed) {
+        foreach ($images as $image) {
+            if ($variants->refresh($image)) {
+                $made++;
+            } else {
+                $failed[] = $image->id;
+            }
+        }
+    });
+
+    $this->info("Made smaller copies of {$made} ".Str::plural('photo', $made).'.');
+    if ($failed !== []) {
+        // These keep showing the original file; the log says why for each one.
+        $this->warn(count($failed).' '.Str::plural('photo', count($failed)).' could not be resized (ids '.implode(', ', $failed).'); they keep using the original. See storage/logs/laravel.log.');
+    }
+
+    return 0;
+})->purpose('Make the small and large copies of product photos that pages load (for photos uploaded before this existed)');
 
 Artisan::command('marketplace:expire-payments', function (PaymentService $payments) {
     $counts = $payments->expireDue();

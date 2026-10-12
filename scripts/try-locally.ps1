@@ -7,8 +7,10 @@
 # Needs PHP 8.3+ and Node 22+. Composer is downloaded if it is not installed. To install them:
 #   winget install -e --id PHP.PHP.8.3
 #   winget install -e --id OpenJS.NodeJS.LTS
-# If PHP is missing extensions this app needs, a php.ini that enables them is written to
-# .try-local\ and used only by this script; your PHP installation is not changed.
+# If PHP is missing extensions this app needs (or its code cache, OPcache), a php.ini that turns
+# them on is written to .try-local\ and used only by this script; your PHP installation is not changed.
+# The site is built once and served as in production, which loads much faster than development mode.
+# Set TRY_DEV=1 to run the development server instead (instant reload when you edit the code).
 # Stop with Ctrl+C. Local use only: the demo passwords below are public.
 
 $ErrorActionPreference = 'Stop'
@@ -61,19 +63,24 @@ foreach ($port in $ApiPort, $WebPort) {
 New-Item -ItemType Directory -Force -Path $Local | Out-Null
 
 # PHP from winget or the windows.php.net zip has no php.ini, so pdo_sqlite, openssl and friends are off.
-$needed = 'openssl', 'curl', 'mbstring', 'fileinfo', 'gd', 'intl', 'pdo_sqlite', 'sqlite3', 'zip'
+$needed = 'openssl', 'curl', 'mbstring', 'fileinfo', 'gd', 'exif', 'intl', 'pdo_sqlite', 'sqlite3', 'zip'
 $required = 'openssl', 'mbstring', 'fileinfo', 'pdo_sqlite'
 $loaded = (& php -m) | ForEach-Object { $_.Trim().ToLower() }
 $missing = @($needed | Where-Object { $loaded -notcontains $_ })
+# Without OPcache, PHP re-reads the whole framework on every request: pages take seconds.
+if ($loaded -notcontains 'zend opcache') { $missing += 'opcache' }
 if ($missing.Count -gt 0) {
     $phpBinary = (& php -r 'echo PHP_BINARY;')
     $item = Get-Item $phpBinary
     if ($item.LinkType -and $item.Target) { $phpBinary = @($item.Target)[0] }
     $extDir = Join-Path (Split-Path -Parent $phpBinary) 'ext'
     if (-not (Test-Path $extDir)) { Fail "PHP is missing $($missing -join ', ') and its ext folder was not found at $extDir." }
-    $lines = @("extension_dir=`"$extDir`"", 'memory_limit=512M')
+    $lines = @("extension_dir=`"$extDir`"", 'memory_limit=512M', 'realpath_cache_size=4096K', 'realpath_cache_ttl=600')
     foreach ($ext in $needed) {
         if (Test-Path (Join-Path $extDir "php_$ext.dll")) { $lines += "extension=$ext" }
+    }
+    if (Test-Path (Join-Path $extDir 'php_opcache.dll')) {
+        $lines += 'zend_extension=opcache', 'opcache.enable=1', 'opcache.memory_consumption=128', 'opcache.max_accelerated_files=20000'
     }
     Write-Text (Join-Path $Local 'php.ini') (($lines -join "`r`n") + "`r`n")
     $env:PHPRC = $Local
@@ -136,6 +143,8 @@ if ((& php $Helper user-exists customer@demo.local) -ne 'yes') {
     # Older demo data has plain colored pictures; swap them for drawn furniture (demo pictures only).
     Invoke-Checked 'php' @('artisan', 'marketplace:demo-pictures', '--no-interaction')
 }
+# Smaller copies of product photos for faster pages; only photos without them are processed.
+Invoke-Checked 'php' @('artisan', 'marketplace:image-variants', '--no-interaction')
 if ((& php $Helper user-exists $AdminEmail) -ne 'yes') {
     Step 'Backend: adding the demo admin'
     Invoke-Checked 'php' @($Helper, 'demo-admin', $AdminEmail, $AdminPassword)
@@ -149,6 +158,11 @@ if (-not (Test-Path '.env')) {
     Write-Text (Join-Path $Frontend '.env') $feText
 }
 Invoke-Checked 'npm.cmd' @('install', '--no-fund', '--no-audit')
+$devMode = $env:TRY_DEV -eq '1'
+if (-not $devMode) {
+    Step 'Frontend: building the site'
+    Invoke-Checked 'npm.cmd' @('run', 'build')
+}
 
 Step 'Starting'
 # Online payment uses the test payment page locally, unless your .env picks a gateway.
@@ -180,7 +194,8 @@ try {
     Write-Host '  Paying online opens a test payment page: no real money moves.'
     Write-Host '  API log: backend\storage\logs\serve.log. Press Ctrl+C to stop.'
     Write-Host ''
-    & npm.cmd run dev -- --port $WebPort --strictPort
+    if ($devMode) { & npm.cmd run dev -- --port $WebPort --strictPort }
+    else { & npm.cmd run preview -- --port $WebPort --strictPort }
 } finally {
     if ($api -and -not $api.HasExited) {
         # artisan serve starts php -S as a child process; stop the whole tree.
