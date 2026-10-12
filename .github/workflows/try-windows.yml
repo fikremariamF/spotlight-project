@@ -61,6 +61,35 @@ jobs:
             $res = Invoke-RestMethod -Method Post http://localhost:5173/api/auth/login -ContentType 'application/json' -Body (@{ email = $u[0]; password = $u[1] } | ConvertTo-Json)
             "login $($u[0]): role $($res.user.role)"
           }
+          # Online payment through the test page, from checkout to paid.
+          $cfg = Invoke-RestMethod http://localhost:5173/api/config
+          "online payments: available=$($cfg.online_payments.available) test=$($cfg.online_payments.test_mode)"
+          if (-not $cfg.online_payments.available) { throw 'online payment not available on a fresh run' }
+          $cust = Invoke-RestMethod -Method Post http://localhost:5173/api/auth/login -ContentType 'application/json' -Body (@{ email = 'customer@demo.local'; password = 'Demo-pass-123' } | ConvertTo-Json)
+          $h = @{ Authorization = "Bearer $($cust.token)"; Accept = 'application/json' }
+          $addr = (Invoke-RestMethod http://localhost:5173/api/addresses -Headers $h).data[0].id
+          $picked = $null
+          foreach ($p in $products.data) {
+            $line = Invoke-RestMethod -Method Post http://localhost:5173/api/cart/items -Headers $h -ContentType 'application/json' -Body (@{ product_slug = $p.slug; quantity = 1 } | ConvertTo-Json)
+            $prev = (Invoke-RestMethod "http://localhost:5173/api/cart?address_id=$addr" -Headers $h).data
+            if (-not $prev.delivery_to_confirm -and -not $prev.has_problems) { $picked = $prev; break }
+            foreach ($g in $prev.groups) { foreach ($l in $g.lines) { Invoke-RestMethod -Method Delete "http://localhost:5173/api/cart/items/$($l.id)" -Headers $h | Out-Null } }
+          }
+          if (-not $picked) { throw 'no listing with a known delivery fee' }
+          $h2 = $h.Clone(); $h2['Idempotency-Key'] = [guid]::NewGuid().ToString()
+          $co = Invoke-RestMethod -Method Post http://localhost:5173/api/checkout -Headers $h2 -ContentType 'application/json' -Body (@{ address_id = $addr; payment_method = 'online'; expected_total_santim = $picked.grand_total_santim } | ConvertTo-Json)
+          $tx = $co.data.payment.payment.tx_ref
+          "checkout $($co.data.id) tx $tx url $($co.data.payment.payment.checkout_url)"
+          if ($co.data.payment.payment.checkout_url -notmatch '/pay/test\?tx_ref=') { throw 'no test payment page' }
+          Invoke-RestMethod -Method Post "http://localhost:5173/api/payments/test/$tx" -Headers $h -ContentType 'application/json' -Body (@{ outcome = 'paid' } | ConvertTo-Json) | Out-Null
+          $st = (Invoke-RestMethod "http://localhost:5173/api/checkouts/$($co.data.id)/payment" -Headers $h).data
+          "payment status $($st.status), order $($st.orders[0].status)"
+          if ($st.status -ne 'paid' -or $st.orders[0].status -ne 'pending_confirmation') { throw 'test payment did not go through' }
+          $page = Invoke-WebRequest -UseBasicParsing "http://localhost:5173/payments/return?checkout=$($co.data.id)"
+          if ($page.Content -notmatch '<div id="root">') { throw 'return page did not load' }
+          Start-Sleep 5
+          if (-not (Test-Path backend\storage\logs\schedule.log)) { throw 'scheduler not started' }
+          Get-Process php | Format-Table Id, ProcessName -AutoSize
           Test-Path .try-local\php.ini; Get-Content .try-local\php.ini
           Test-Path .try-local\composer.phar
           Get-Item backend\public\storage | Format-List LinkType, Target
@@ -68,6 +97,10 @@ jobs:
           & taskkill.exe /PID $p.Id /T /F
           Get-Process php, node -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 3
+          # An .env from before online payments has no gateway line: the script must still use the test page.
+          $envPath = 'backend\.env'
+          [System.IO.File]::WriteAllLines((Resolve-Path $envPath), [string[]](Get-Content $envPath | Where-Object { $_ -notmatch '^MARKETPLACE_PAYMENT_GATEWAY=' }))
+          if (Select-String -Path $envPath -Pattern '^MARKETPLACE_PAYMENT_GATEWAY=' -Quiet) { throw 'could not simulate an old .env' }
           $p2 = Start-Try 2
           $up = Wait-Up
           Get-Content run2.log; Get-Content run2.err
@@ -76,5 +109,8 @@ jobs:
           if (-not (Select-String -Path run2.log -Pattern 'Demo sellers and listings already there' -Quiet)) { throw 'second run reseeded demo' }
           $res = Invoke-RestMethod -Method Post http://localhost:5173/api/auth/login -ContentType 'application/json' -Body (@{ email = 'admin@demo.local'; password = 'Admin-pass-123!' } | ConvertTo-Json)
           "second run admin login: $($res.user.role)"
+          $cfg2 = Invoke-RestMethod http://localhost:5173/api/config
+          "second run online payments: available=$($cfg2.online_payments.available)"
+          if (-not $cfg2.online_payments.available) { throw 'old .env: online payment not available' }
           & taskkill.exe /PID $p2.Id /T /F
           'ALL OK'
