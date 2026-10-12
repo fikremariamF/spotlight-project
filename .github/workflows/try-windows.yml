@@ -52,8 +52,16 @@ jobs:
           $products = Invoke-RestMethod http://localhost:5173/api/products
           "products: $($products.data.Count)"
           if ($products.data.Count -lt 1) { throw 'no products' }
+          if ($page.Content -match '@vite/client') { throw 'dev server is running, not the built site' }
+          if ($page.Content -notmatch '/assets/index-') { throw 'built assets missing' }
           $img = $products.data[0].image
           "image: $img"
+          if ($img -notmatch '-thumb\.webp$') { throw 'cards do not get the small photo copy' }
+          # Response times with OPcache on (the try script turns it on when missing).
+          $times = 1..10 | ForEach-Object { (Measure-Command { Invoke-WebRequest -UseBasicParsing http://localhost:5173/api/products | Out-Null }).TotalMilliseconds }
+          "api /products ms: $([math]::Round(($times | Measure-Object -Average).Average)) avg, $([math]::Round(($times | Measure-Object -Maximum).Maximum)) max"
+          $times = 1..5 | ForEach-Object { (Measure-Command { Invoke-WebRequest -UseBasicParsing http://localhost:5173/search | Out-Null }).TotalMilliseconds }
+          "page /search ms: $([math]::Round(($times | Measure-Object -Average).Average)) avg"
           $path = ([uri]$img).AbsolutePath
           $r = Invoke-WebRequest -UseBasicParsing ("http://localhost:5173" + $path)
           "image status $($r.StatusCode) type $($r.Headers['Content-Type'])"
@@ -97,6 +105,8 @@ jobs:
           if (-not (Test-Path backend\storage\logs\schedule.log)) { throw 'scheduler not started' }
           Get-Process php | Format-Table Id, ProcessName -AutoSize
           Test-Path .try-local\php.ini; Get-Content .try-local\php.ini
+          if (-not (Select-String -Path .try-local\php.ini -Pattern '^zend_extension=opcache' -Quiet)) { throw 'OPcache not turned on' }
+          if (-not (Select-String -Path run1.log -Pattern 'Made smaller copies of' -Quiet)) { throw 'photo copies step did not run' }
           Test-Path .try-local\composer.phar
           Get-Item backend\public\storage | Format-List LinkType, Target
           # Stop and run again: data must be kept.
