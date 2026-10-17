@@ -5,6 +5,7 @@ import { useConfig } from '../../context/ConfigContext'
 import { api, parseError } from '../../lib/api'
 import { formatETB } from '../../lib/format'
 import { useFetch } from '../../lib/useFetch'
+import VariantEditor from './VariantEditor'
 
 const EMPTY = {
   name: '', category_id: '', description: '', price: '', price_negotiable: false,
@@ -59,9 +60,14 @@ export default function SellerProductForm() {
   const [errors, setErrors] = useState({})
   const [message, setMessage] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Options are saved on their own, so the listing as the server last returned it.
+  const [saved, setSaved] = useState(null)
 
   useEffect(() => {
-    if (existing.data) setValues(fromProduct(existing.data.data))
+    if (existing.data) {
+      setValues(fromProduct(existing.data.data))
+      setSaved(existing.data.data)
+    }
   }, [existing.data])
 
   const previews = useMemo(() => files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })), [files])
@@ -72,7 +78,8 @@ export default function SellerProductForm() {
     ...(c.children || []).map((ch) => ({ id: ch.id, name: `${c.name} / ${ch.name}` })),
   ]), [categories.data])
 
-  const product = existing.data?.data
+  const product = saved || existing.data?.data
+  const hasOptions = (product?.variants || []).length > 0
   const existingImages = product?.images || []
   const remainingSlots = config.max_product_images - existingImages.length
 
@@ -101,6 +108,11 @@ export default function SellerProductForm() {
     try {
       // While the marketplace prices delivery, a listing is either free to deliver or left to it.
       const data = payload(storesSetFee ? values : { ...values, delivery_fee: isFree(values.delivery_fee) ? '0' : '' })
+      if (editing) {
+        // With options, stock is set per option. Otherwise the server checks no order came in since the form opened.
+        if (hasOptions) delete data.stock_quantity
+        else data.stock_expected = product.stock_quantity
+      }
       if (!editing) {
         const form = new FormData()
         Object.entries({ ...data, action }).forEach(([k, v]) => {
@@ -199,6 +211,11 @@ export default function SellerProductForm() {
               <Field label="Production time (days)" name="production_days" error={errors.production_days}>
                 <input className="input" inputMode="numeric" {...bind('production_days')} />
               </Field>
+            ) : hasOptions ? (
+              <div className="text-sm">
+                <p className="label">Units in stock</p>
+                <p className="mt-2 text-stone-700">{product.stock_quantity} in total, set for each option below.</p>
+              </div>
             ) : (
               <Field label="Units in stock" name="stock_quantity" error={errors.stock_quantity}>
                 <input className="input" inputMode="numeric" {...bind('stock_quantity')} />
@@ -206,6 +223,7 @@ export default function SellerProductForm() {
             )}
           </div>
           <label className="flex items-center gap-2 text-sm"><input className="size-4 accent-brand-700" {...bind('custom_order_available', 'checkbox')} /> Customers can request custom sizes or finishes</label>
+          {editing && <p className="text-xs text-stone-500"><a href="#options-title" className="font-semibold text-brand-700 hover:underline">Options</a> (sizes, colors, materials) are below the Save button.</p>}
         </section>
 
         <section className="card space-y-4 p-5">
@@ -220,6 +238,10 @@ export default function SellerProductForm() {
             <Field label="Color" name="color" error={errors.color}><input className="input" {...bind('color')} /></Field>
           </div>
         </section>
+
+        {!editing && (
+          <p className="rounded-lg bg-stone-100 px-4 py-3 text-sm text-stone-700">Selling it in several sizes, colors or materials? Save the listing first, then add options with their own stock.</p>
+        )}
 
         <section className="card space-y-4 p-5">
           <h2 className="font-semibold text-stone-900">Delivery and pickup</h2>
@@ -300,6 +322,13 @@ export default function SellerProductForm() {
           )}
         </div>
       </form>
+
+      {editing && product && product.status !== 'archived' && (
+        <div className="mt-8">
+          <VariantEditor product={product} tracked={product.stock_type === 'in_stock'}
+            onChange={(p) => { setSaved(p); setValues((v) => ({ ...v, stock_quantity: String(p.stock_quantity) })) }} />
+        </div>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\BusinessType;
 use App\Enums\SellerStatus;
+use App\Services\InventoryService;
 use App\Support\MapPin;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +25,12 @@ class SellerProfile extends Model
     protected $attributes = [
         'status' => 'pending',
     ];
+
+    protected static function booted(): void
+    {
+        // Every store has a default stock location from the start (see InventoryService).
+        static::created(fn (SellerProfile $profile) => app(InventoryService::class)->defaultWarehouse($profile->id));
+    }
 
     protected function casts(): array
     {

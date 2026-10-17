@@ -5,6 +5,7 @@ namespace Tests\Concerns;
 use App\Models\Address;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductVariant;
 use App\Models\SellerProfile;
 use App\Models\User;
 use Illuminate\Support\Str;
@@ -52,12 +53,12 @@ trait PlacesOrders
         return $this;
     }
 
-    protected function placeOrder(int $qty = 2, ?User $buyer = null, ?Product $product = null): Order
+    protected function placeOrder(int $qty = 2, ?User $buyer = null, ?Product $product = null, ?ProductVariant $variant = null): Order
     {
         $buyer ??= $this->buyer;
         $product ??= $this->sofa;
         $address = $buyer->addresses()->first() ?? $this->addressFor($buyer);
-        $this->as($buyer)->postJson('/api/cart/items', ['product_slug' => $product->slug, 'quantity' => $qty])->assertCreated();
+        $this->as($buyer)->postJson('/api/cart/items', ['product_slug' => $product->slug, 'quantity' => $qty, 'variant_id' => $variant?->id])->assertCreated();
         $expected = $this->getJson('/api/cart?address_id='.$address->id)->json('data.grand_total_santim');
         $this->postJson('/api/checkout', ['address_id' => $address->id, 'payment_method' => 'cod', 'expected_total_santim' => $expected],
             ['Idempotency-Key' => (string) Str::uuid()])->assertCreated();

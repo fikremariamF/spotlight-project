@@ -54,6 +54,7 @@ export default function OrderView({ order, viewer, actions, itemExtra }) {
                 <ProductImage src={i.image} alt="" className="size-14 shrink-0 rounded-lg" />
                 <div className="min-w-0 flex-1 text-sm">
                   <p className="font-medium text-stone-900">{i.product_slug && !i.quote_id ? <Link to={`/products/${i.product_slug}`} className="hover:underline">{i.name}</Link> : i.name}</p>
+                  {i.variant_label && <p className="text-stone-700">{i.variant_label}</p>}
                   <p className="text-stone-600">
                     {i.quantity} x {formatETB(i.unit_price_santim)}
                     {i.quote_id && ' · custom quote'}

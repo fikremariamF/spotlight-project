@@ -48,6 +48,20 @@ class ProductResource extends JsonResource
             ],
             'material' => $this->material,
             'color' => $this->color,
+            'sku' => $this->when($this->withModeration, fn () => $this->sku),
+            'options_count' => $this->whenCounted('variants'),
+            // Options a customer picks from, each with its own stock and price.
+            'variants' => $this->whenLoaded('variants', fn () => $this->variants->map(fn ($v) => [
+                'id' => $v->id,
+                'label' => $v->label(),
+                'size' => $v->size,
+                'color' => $v->color,
+                'material' => $v->material,
+                'price' => Money::toBirr($v->priceSantim($this->resource)),
+                'price_santim' => $v->priceSantim($this->resource),
+                'stock_quantity' => $v->stock_quantity,
+                'is_available' => $this->stock_type->value === 'made_to_order' || $v->stock_quantity > 0,
+            ] + ($this->withModeration ? ['own_price' => Money::toBirr($v->price_santim), 'sku' => $v->sku] : []))->values()->all()),
             'area' => $this->whenLoaded('area', fn () => $this->area?->name),
             'area_id' => $this->area_id,
             'delivery' => [

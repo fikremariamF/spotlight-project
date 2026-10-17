@@ -7,9 +7,10 @@ import { useCart } from '../context/CartContext'
 import { api, parseError } from '../lib/api'
 
 /**
- * Quantity stepper and "Add to cart" for a listing. Only customer accounts can buy.
+ * Quantity stepper and "Add to cart" for a listing. Only customer accounts can buy. A listing with
+ * options needs one picked (`variant`); until then the button points to the picker.
  */
-export default function AddToCart({ product, full = false, compact = false }) {
+export default function AddToCart({ product, variant = null, full = false, compact = false }) {
   const { user } = useAuth()
   const { refreshCart } = useCart()
   const location = useLocation()
@@ -20,7 +21,9 @@ export default function AddToCart({ product, full = false, compact = false }) {
   const [error, setError] = useState(null)
 
   const inStock = product.stock_type === 'in_stock'
-  const max = Math.min(inStock ? product.stock_quantity : 10, 99)
+  const needsOption = (product.variants || []).length > 0 || product.options_count > 0
+  const stock = variant ? variant.stock_quantity : product.stock_quantity
+  const max = Math.max(1, Math.min(inStock ? stock : 10, 99))
   if (inStock && product.stock_quantity < 1) return null
 
   if (!user) {
@@ -32,9 +35,9 @@ export default function AddToCart({ product, full = false, compact = false }) {
     setBusy(true)
     setError(null)
     try {
-      await api.post('/cart/items', { product_slug: product.slug, quantity })
+      await api.post('/cart/items', { product_slug: product.slug, quantity: Math.min(quantity, max), variant_id: variant?.id })
       refreshCart()
-      toast.success(`Added to your cart: ${product.name}`, { action: { label: 'View cart', onClick: () => navigate('/cart') } })
+      toast.success(`Added to your cart: ${product.name}${variant ? ` (${variant.label})` : ''}`, { action: { label: 'View cart', onClick: () => navigate('/cart') } })
     } catch (err) {
       const e = parseError(err)
       const message = Object.values(e.fields)[0] || e.message
@@ -46,6 +49,19 @@ export default function AddToCart({ product, full = false, compact = false }) {
   }
 
   const set = (n) => setQuantity(Math.max(1, Math.min(max, n)))
+  if (needsOption && !variant) {
+    // On the listing page the picker is right there; elsewhere (quick view, compare) open the listing.
+    const pick = () => {
+      const picker = document.getElementById('options')
+      if (!picker) return navigate(`/products/${product.slug}#options`)
+      picker.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      picker.querySelector('input:not(:disabled)')?.focus({ preventScroll: true })
+    }
+    return <button type="button" className={`btn-primary ${full ? 'w-full' : ''}`} onClick={pick}>Choose an option</button>
+  }
+  if (inStock && variant && variant.stock_quantity < 1) {
+    return <button type="button" className={`btn-primary ${full ? 'w-full' : ''}`} disabled>Out of stock</button>
+  }
   if (compact) {
     return (
       <button type="button" className="btn-primary" disabled={busy} onClick={add}>

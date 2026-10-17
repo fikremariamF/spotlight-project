@@ -91,6 +91,7 @@ class OrderResource extends JsonResource
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($i) => [
                 'id' => $i->id,
                 'name' => $i->name,
+                'variant_label' => $i->variant_label,
                 'product_slug' => $i->relationLoaded('product') ? $i->product?->slug : null,
                 'image' => $i->relationLoaded('product') && $i->product?->relationLoaded('primaryImage') ? $i->product->primaryImage?->thumbUrl() : null,
                 'quote_id' => $i->quote_id,

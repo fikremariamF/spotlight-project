@@ -12,6 +12,7 @@ use App\Models\SellerProfile;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
 use App\Services\ImageVariants;
+use App\Services\InventoryService;
 use App\Support\Slug;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Storage;
@@ -140,7 +141,7 @@ class DemoSeeder extends Seeder
                 'price_negotiable' => $i % 3 === 0,
                 'condition' => $condition,
                 'stock_type' => $stockType,
-                'stock_quantity' => $stockType === 'in_stock' ? $qtyOrDays : 0,
+                'stock_quantity' => 0,
                 'production_days' => $stockType === 'made_to_order' ? $qtyOrDays : null,
                 'custom_order_available' => $stockType === 'made_to_order' || $seller->offers_custom_orders,
                 'width_cm' => $w, 'depth_cm' => $d, 'height_cm' => $h,
@@ -158,6 +159,10 @@ class DemoSeeder extends Seeder
             $product->published_at = now()->subDays(count(self::PRODUCTS) - $i);
             $product->is_featured = $i % 5 === 0;
             $product->save();
+            if ($stockType === 'in_stock') {
+                // Through the stock service, so the demo store's stock history starts at its stock.
+                app(InventoryService::class)->setTotal($product, null, $qtyOrDays, null, 'opening');
+            }
 
             $path = "products/{$product->id}/".self::ART_PREFIX.Str::random(8).'.jpg';
             Storage::disk(ProductImage::ORIGINALS_DISK)->put($path, (new DemoFurnitureArt)->jpeg($name, $color, $i));

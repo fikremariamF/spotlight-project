@@ -42,6 +42,8 @@ class ProductRequest extends FormRequest
             'condition' => [$required, Rule::enum(ProductCondition::class)],
             'stock_type' => [$required, Rule::enum(StockType::class)],
             'stock_quantity' => ['nullable', 'integer', 'min:0', 'max:100000'],
+            // The stock shown when the form was opened; a mismatch on save means an order came in meanwhile.
+            'stock_expected' => ['nullable', 'integer', 'min:0'],
             'production_days' => ['nullable', 'integer', 'min:1', 'max:365'],
             'custom_order_available' => ['sometimes', 'boolean'],
             'width_cm' => ['nullable', 'integer', 'min:1', 'max:2000'],
@@ -108,7 +110,7 @@ class ProductRequest extends FormRequest
      */
     public function productAttributes(): array
     {
-        $data = collect($this->validated())->except(['price', 'delivery_fee', 'action', 'images'])->all();
+        $data = collect($this->validated())->except(['price', 'delivery_fee', 'action', 'images', 'stock_expected'])->all();
 
         if ($this->has('price')) {
             $data['price_santim'] = Money::toSantim($this->input('price'));

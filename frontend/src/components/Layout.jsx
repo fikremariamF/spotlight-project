@@ -340,7 +340,7 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-white focus:p-2">Skip to content</a>
-      <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-white/90 backdrop-blur-md">
+      <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-white/90 backdrop-blur-md print:hidden">
         <div className="container-page flex h-16 items-center gap-2 sm:gap-3 lg:gap-5">
           {/* On narrow phones the name gives way (truncates) so the bell and menu always fit. */}
           <Link to="/" className="flex min-w-0 items-center gap-2 font-bold text-brand-800 md:shrink-0">

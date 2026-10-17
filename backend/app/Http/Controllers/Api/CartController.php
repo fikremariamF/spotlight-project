@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Area;
 use App\Models\CartItem;
 use App\Models\Product;
+use App\Models\ProductVariant;
 use App\Models\Quote;
 use App\Models\User;
 use App\Services\CheckoutCalculator;
@@ -53,12 +54,14 @@ class CartController extends Controller
     }
 
     /**
-     * Add a listing, or raise its quantity if it is already in the cart.
+     * Add a listing (and the option picked, when it has options), or raise its quantity if it is
+     * already in the cart.
      */
     public function add(Request $request): JsonResponse
     {
         $data = $request->validate([
             'product_slug' => ['required', 'string', 'max:200'],
+            'variant_id' => ['nullable', 'integer'],
             'quantity' => ['sometimes', 'integer', 'min:1', 'max:'.config('marketplace.cart.max_quantity')],
         ]);
         $user = $request->user();
@@ -67,10 +70,21 @@ class CartController extends Controller
         if (! $product) {
             throw ValidationException::withMessages(['product_slug' => 'This listing is not available.']);
         }
+        $variants = $product->variants()->get();
+        $variant = null;
+        if ($variants->isNotEmpty()) {
+            $variant = $variants->firstWhere('id', (int) ($data['variant_id'] ?? 0));
+            if (! $variant) {
+                throw ValidationException::withMessages(['variant_id' => 'Choose an option (size, color or material).']);
+            }
+        } elseif (! empty($data['variant_id'])) {
+            throw ValidationException::withMessages(['variant_id' => 'This listing has no options. Reload the page.']);
+        }
 
-        DB::transaction(function () use ($user, $product, $data) {
+        DB::transaction(function () use ($user, $product, $variant, $data) {
             User::whereKey($user->id)->lockForUpdate()->first();
-            $item = CartItem::where('user_id', $user->id)->where('product_id', $product->id)->first();
+            $item = CartItem::where('user_id', $user->id)->where('product_id', $product->id)
+                ->when($variant, fn ($q) => $q->where('variant_id', $variant->id), fn ($q) => $q->whereNull('variant_id'))->first();
             $quantity = ($item?->quantity ?? 0) + ($data['quantity'] ?? 1);
 
             if (! $item) {
@@ -78,8 +92,9 @@ class CartController extends Controller
                 $item = new CartItem;
                 $item->user_id = $user->id;
                 $item->product_id = $product->id;
+                $item->variant_id = $variant?->id;
             }
-            $item->quantity = $this->checkedQuantity($product, $quantity);
+            $item->quantity = $this->checkedQuantity($product, $quantity, $variant);
             $item->save();
         });
 
@@ -125,12 +140,15 @@ class CartController extends Controller
         $data = $request->validate([
             'quantity' => ['required', 'integer', 'min:1', 'max:'.config('marketplace.cart.max_quantity')],
         ]);
-        $item = CartItem::where('user_id', $request->user()->id)->with('product')->findOrFail($id);
+        $item = CartItem::where('user_id', $request->user()->id)->with(['product', 'variant'])->findOrFail($id);
         if ($item->quote_id) {
             throw ValidationException::withMessages(['quantity' => 'The quantity of a quote is set by the seller.']);
         }
+        if (! $item->product) {
+            throw ValidationException::withMessages(['quantity' => 'This listing is no longer available.']);
+        }
 
-        $item->quantity = $this->checkedQuantity($item->product, $data['quantity']);
+        $item->quantity = $this->checkedQuantity($item->product, $data['quantity'], $item->variant);
         $item->save();
 
         return $this->show($request);
@@ -152,7 +170,8 @@ class CartController extends Controller
     {
         $items = CartItem::where('user_id', $user->id)
             ->with([
-                'product' => fn ($q) => $q->withTrashed()->with(['seller.area', 'primaryImage']),
+                'product' => fn ($q) => $q->withTrashed()->with(['seller.area', 'primaryImage', 'variants']),
+                'variant' => fn ($q) => $q->withTrashed(),
                 'quote' => fn ($q) => $q->with(['seller.area', 'product']),
             ])
             ->orderBy('id')
@@ -170,14 +189,18 @@ class CartController extends Controller
         }
     }
 
-    private function checkedQuantity(Product $product, int $quantity): int
+    private function checkedQuantity(Product $product, int $quantity, ?ProductVariant $variant = null): int
     {
         $max = (int) config('marketplace.cart.max_quantity');
+        if ($variant?->trashed()) {
+            throw ValidationException::withMessages(['quantity' => 'This option is no longer available.']);
+        }
         if ($product->stock_type === StockType::InStock) {
-            if ($product->stock_quantity < 1) {
+            $stock = (int) ($variant ? $variant->stock_quantity : $product->stock_quantity);
+            if ($stock < 1) {
                 throw ValidationException::withMessages(['quantity' => 'This item is out of stock.']);
             }
-            $max = min($max, $product->stock_quantity);
+            $max = min($max, $stock);
         }
         if ($quantity > $max) {
             throw ValidationException::withMessages(['quantity' => "Only {$max} can be ordered."]);

@@ -41,6 +41,10 @@ class MoneyTest extends TestCase
         $this->assertSame('0.05', Money::toBirr(5));
         $this->assertSame('0.00', Money::toBirr(0));
         $this->assertNull(Money::toBirr(null));
+        // Credits on returns go out as negative amounts.
+        $this->assertSame('-1500.50', Money::toBirr(-150050));
+        $this->assertSame('-0.05', Money::toBirr(-5));
+        $this->assertSame('-1.00', Money::toBirr(-100));
     }
 
     public function test_round_trip_is_lossless(): void

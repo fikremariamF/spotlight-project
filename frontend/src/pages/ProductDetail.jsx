@@ -11,6 +11,7 @@ import Gallery from '../components/Gallery'
 import ProductRail from '../components/ProductRail'
 import { RatingSummary, ReviewList } from '../components/Reviews'
 import ShareMenu from '../components/ShareMenu'
+import VariantPicker from '../components/VariantPicker'
 import { ErrorState } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { usePaymentWording } from '../context/ConfigContext'
@@ -52,11 +53,15 @@ export default function ProductDetail() {
   const recent = useRecentlyViewed(slug)
   const pay = usePaymentWording()
   const [contactOpen, setContactOpen] = useState(false)
+  const [picked, setPicked] = useState(null)
 
   useEffect(() => {
     if (p?.slug) rememberViewed(p.slug)
   }, [p?.slug])
 
+  // A single option needs no choice; with several the customer picks, so nobody buys the wrong color by default.
+  const variants = p?.variants || []
+  const variant = variants.find((v) => v.id === picked) || (variants.length === 1 && variants[0].is_available ? variants[0] : null)
   const similarList = useMemo(() => (similar.data?.data || []).filter((x) => x.slug !== slug).slice(0, 8), [similar.data, slug])
 
   if (loading && !p) return <DetailSkeleton />
@@ -101,18 +106,22 @@ export default function ProductDetail() {
           </p>
 
           <div className="mt-5 flex items-baseline gap-3">
-            <span className="text-3xl font-bold tracking-tight text-stone-900 sm:text-4xl">{formatETB(p.price_santim)}</span>
+            <span className="text-3xl font-bold tracking-tight text-stone-900 sm:text-4xl">{formatETB(variant ? variant.price_santim : p.price_santim)}</span>
+            {!variant && new Set(variants.map((v) => v.price_santim)).size > 1 && <span className="text-sm text-stone-500">Price depends on the option</span>}
             {p.price_negotiable && <span className="rounded-full bg-clay-500/10 px-2.5 py-1 text-xs font-semibold text-clay-600">Price negotiable</span>}
           </div>
           <p className={`mt-2 inline-flex items-center gap-1.5 text-sm font-medium ${p.is_available ? 'text-emerald-700' : 'text-red-700'}`}>
             {madeToOrder && <Clock className="size-4" aria-hidden="true" />}
             {madeToOrder
               ? `Made to order. Estimated production time ${p.production_days} days.`
-              : p.is_available ? `In stock (${p.stock_quantity} available)` : 'Out of stock. Ask the seller about restocking.'}
+              : !p.is_available ? 'Out of stock. Ask the seller about restocking.'
+                : variant ? (variant.is_available ? `In stock (${variant.stock_quantity} available)` : 'This option is out of stock.')
+                  : `In stock (${p.stock_quantity} available${variants.length ? ' across all options' : ''})`}
           </p>
 
           <div id="buy" className="mt-6 space-y-3 scroll-mt-24">
-            <AddToCart product={p} full />
+            <VariantPicker product={p} value={variant} onChange={(v) => setPicked(v.id)} />
+            <AddToCart key={variant?.id ?? 'none'} product={p} variant={variant} full />
             <div className="flex flex-wrap gap-2">
               {!contactOpen && (
                 <button type="button" className="btn-secondary" onClick={() => setContactOpen(true)}>
@@ -200,9 +209,9 @@ export default function ProductDetail() {
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs text-stone-500">{p.name}</p>
-              <p className="text-lg font-bold text-stone-900">{formatETB(p.price_santim)}</p>
+              <p className="text-lg font-bold text-stone-900">{formatETB(variant ? variant.price_santim : p.price_santim)}</p>
             </div>
-            <AddToCart product={p} compact />
+            <AddToCart product={p} variant={variant} compact />
           </div>
         </div>
       )}

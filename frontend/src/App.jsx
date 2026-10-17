@@ -1,9 +1,9 @@
-import { lazy } from 'react'
+import { Suspense, lazy } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import RequireRole from './components/RequireRole'
 import { useAuth } from './context/AuthContext'
-import { NotFound } from './components/ui'
+import { NotFound, Spinner } from './components/ui'
 import Compare from './pages/Compare'
 import { Login, Register, SellerApply } from './pages/Auth'
 import Cart from './pages/Cart'
@@ -53,6 +53,31 @@ const SellerOrders = lazy(() => import('./pages/seller/SellerOrders').then((m) =
 const SellerReviews = lazy(() => import('./pages/seller/SellerReviews'))
 const SellerProductForm = lazy(() => import('./pages/seller/SellerProductForm'))
 const SellerProfile = lazy(() => import('./pages/seller/SellerProfile'))
+const ErpOverview = lazy(() => import('./pages/seller/erp/ErpOverview'))
+const ErpInventory = lazy(() => import('./pages/seller/erp/ErpInventory'))
+const ErpItem = lazy(() => import('./pages/seller/erp/ErpItem'))
+const ErpMovements = lazy(() => import('./pages/seller/erp/ErpMovements'))
+const ErpSettings = lazy(() => import('./pages/seller/erp/ErpSettings'))
+const ErpWarehouses = lazy(() => import('./pages/seller/erp/ErpWarehouses'))
+const ErpWarehouse = lazy(() => import('./pages/seller/erp/ErpWarehouse'))
+const ErpTransfer = lazy(() => import('./pages/seller/erp/ErpTransfer'))
+const ErpTransferNew = lazy(() => import('./pages/seller/erp/ErpTransfer').then((m) => ({ default: m.ErpTransferNew })))
+const ErpSuppliers = lazy(() => import('./pages/seller/erp/ErpSuppliers'))
+const ErpSupplier = lazy(() => import('./pages/seller/erp/ErpSupplier'))
+const ErpSupplierNew = lazy(() => import('./pages/seller/erp/ErpSupplier').then((m) => ({ default: m.ErpSupplierNew })))
+const ErpPurchases = lazy(() => import('./pages/seller/erp/ErpPurchases'))
+const ErpPurchase = lazy(() => import('./pages/seller/erp/ErpPurchase'))
+const ErpPurchaseForm = lazy(() => import('./pages/seller/erp/ErpPurchaseForm'))
+const ErpPurchasePrint = lazy(() => import('./pages/seller/erp/ErpPurchasePrint'))
+const ErpSales = lazy(() => import('./pages/seller/erp/ErpSales'))
+const ErpSaleNew = lazy(() => import('./pages/seller/erp/ErpSaleNew'))
+const ErpSale = lazy(() => import('./pages/seller/erp/ErpSale'))
+const ErpOrderSale = lazy(() => import('./pages/seller/erp/ErpOrderSale'))
+const ErpSalePrint = lazy(() => import('./pages/seller/erp/ErpSalePrint'))
+const ErpExpenses = lazy(() => import('./pages/seller/erp/ErpExpenses'))
+const ErpExpense = lazy(() => import('./pages/seller/erp/ErpExpense'))
+const ErpFinance = lazy(() => import('./pages/seller/erp/ErpFinance'))
+const ErpReports = lazy(() => import('./pages/seller/erp/ErpReports'))
 
 /** Messages are shared with customers: sellers see them inside the seller area, customers in the shop. */
 function SellerShellFor({ children }) {
@@ -63,6 +88,10 @@ function SellerShellFor({ children }) {
 export default function App() {
   return (
     <Routes>
+      {/* A printable page without the site around it. */}
+      <Route path="seller/erp/purchases/:id/print" element={<RequireRole roles={['seller']}><Suspense fallback={<Spinner />}><ErpPurchasePrint /></Suspense></RequireRole>} />
+      <Route path="seller/erp/sales/offline/:id/print" element={<RequireRole roles={['seller']}><Suspense fallback={<Spinner />}><ErpSalePrint /></Suspense></RequireRole>} />
+      <Route path="seller/erp/sales/orders/:id/print" element={<RequireRole roles={['seller']}><Suspense fallback={<Spinner />}><ErpSalePrint marketplace /></Suspense></RequireRole>} />
       <Route element={<Layout />}>
         <Route index element={<Home />} />
         <Route path="search" element={<Catalog />} />
@@ -99,6 +128,30 @@ export default function App() {
           <Route path="profile" element={<SellerProfile />} />
           <Route path="products/new" element={<SellerProductForm />} />
           <Route path="products/:id/edit" element={<SellerProductForm />} />
+          <Route path="erp" element={<ErpOverview />} />
+          <Route path="erp/inventory" element={<ErpInventory />} />
+          <Route path="erp/inventory/:id" element={<ErpItem />} />
+          <Route path="erp/movements" element={<ErpMovements />} />
+          <Route path="erp/settings" element={<ErpSettings />} />
+          <Route path="erp/warehouses" element={<ErpWarehouses />} />
+          <Route path="erp/warehouses/:id" element={<ErpWarehouse />} />
+          <Route path="erp/transfers/new" element={<ErpTransferNew />} />
+          <Route path="erp/transfers/:id" element={<ErpTransfer />} />
+          <Route path="erp/suppliers" element={<ErpSuppliers />} />
+          <Route path="erp/suppliers/new" element={<ErpSupplierNew />} />
+          <Route path="erp/suppliers/:id" element={<ErpSupplier />} />
+          <Route path="erp/purchases" element={<ErpPurchases />} />
+          <Route path="erp/purchases/new" element={<ErpPurchaseForm />} />
+          <Route path="erp/purchases/:id" element={<ErpPurchase />} />
+          <Route path="erp/purchases/:id/edit" element={<ErpPurchaseForm />} />
+          <Route path="erp/sales" element={<ErpSales />} />
+          <Route path="erp/sales/new" element={<ErpSaleNew />} />
+          <Route path="erp/sales/offline/:id" element={<ErpSale />} />
+          <Route path="erp/sales/orders/:id" element={<ErpOrderSale />} />
+          <Route path="erp/expenses" element={<ErpExpenses />} />
+          <Route path="erp/expenses/:id" element={<ErpExpense />} />
+          <Route path="erp/finance" element={<ErpFinance />} />
+          <Route path="erp/reports" element={<ErpReports />} />
         </Route>
 
         <Route path="admin" element={<RequireRole roles={['admin']}><AdminLayout /></RequireRole>}>

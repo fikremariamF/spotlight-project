@@ -14,10 +14,12 @@ use App\Models\OrderItem;
 use App\Models\OrderStatusHistory;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductVariant;
 use App\Models\Quote;
 use App\Models\Refund;
 use App\Models\Setting;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -29,6 +31,7 @@ class OrderService
         private readonly AuditLogger $audit,
         private readonly LedgerService $ledger,
         private readonly Alerts $alerts,
+        private readonly InventoryService $inventory,
     ) {}
 
     /**
@@ -59,9 +62,16 @@ class OrderService
             $locked = Product::withTrashed()->whereIn('id', $productIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $quoteIds = $lines->pluck('quote_id')->filter()->sort()->values()->all();
             $lockedQuotes = Quote::whereIn('id', $quoteIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+            // Options are guarded by their listing's lock, so reading them now gives settled stock.
+            $variants = ProductVariant::withTrashed()->whereIn('id', $lines->pluck('variant_id')->filter()->all())->get()->keyBy('id');
+            $current = ProductVariant::whereIn('product_id', $productIds)->get()->groupBy('product_id');
             foreach ($lines as $line) {
                 if ($line->product_id) {
                     $line->product->setRawAttributes($locked[$line->product_id]->getAttributes(), true);
+                    $line->product->setRelation('variants', $current[$line->product_id] ?? new EloquentCollection);
+                }
+                if ($line->variant_id) {
+                    $line->setRelation('variant', $variants[$line->variant_id] ?? null);
                 }
                 if ($line->quote_id) {
                     $line->quote->setRawAttributes($lockedQuotes[$line->quote_id]->getAttributes(), true);
@@ -150,12 +160,16 @@ class OrderService
                         $item->production_days = $cartLine->quote->production_days;
                     } else {
                         $product = $locked[$cartLine->product_id];
+                        $variant = $cartLine->variant_id ? $variants[$cartLine->variant_id] : null;
                         $item->product_id = $product->id;
+                        $item->variant_id = $variant?->id;
+                        $item->variant_label = $variant ? ($variant->label() ?: null) : null;
                         $item->stock_type = $product->stock_type->value;
                         $item->production_days = $product->production_days;
+                        $item->unit_cost_santim = InventoryService::unitCost($product, $variant);
                         if ($product->stock_type === StockType::InStock) {
                             // Reserve now; the calculator already checked there is enough under the lock.
-                            $product->decrement('stock_quantity', $row['quantity']);
+                            $this->inventory->reserve($product, $variant, $row['quantity'], $order, $customer);
                             $item->reserved_quantity = $row['quantity'];
                         }
                     }
@@ -235,7 +249,7 @@ class OrderService
                 $order->cancel_reason = $note;
                 $order->cancelled_by = $role;
                 $order->cancelled_at = now();
-                $this->releaseStock($order);
+                $this->releaseStock($order, $actor);
                 // Money paid online for a cancelled order goes back to the customer.
                 if ($order->payment_status === 'paid' && $order->payment_method === 'online') {
                     $order->payment_status = 'refund_due';
@@ -303,7 +317,7 @@ class OrderService
             $order->cancel_reason = $reason;
             $order->cancelled_by = $role;
             $order->cancelled_at = now();
-            $this->releaseStock($order);
+            $this->releaseStock($order, $actor);
             $order->save();
             $this->record($order, OrderStatus::AwaitingPayment, OrderStatus::Cancelled, $actor, $role, $reason);
         }
@@ -326,10 +340,19 @@ class OrderService
             if (! $id || ($column === 'product_id' && ! Product::whereKey($id)->exists())) {
                 continue;
             }
-            if (! CartItem::where('user_id', $order->customer_id)->where($column, $id)->exists()) {
+            $variantId = $item->quote_id ? null : $item->variant_id;
+            if ($variantId && ! ProductVariant::whereKey($variantId)->exists()) {
+                continue;
+            }
+            $existing = CartItem::where('user_id', $order->customer_id)->where($column, $id);
+            if ($column === 'product_id') {
+                $existing->when($variantId, fn ($q) => $q->where('variant_id', $variantId), fn ($q) => $q->whereNull('variant_id'));
+            }
+            if (! $existing->exists()) {
                 $line = new CartItem;
                 $line->user_id = $order->customer_id;
                 $line->{$column} = $id;
+                $line->variant_id = $variantId;
                 $line->quantity = $item->quote_id ? 1 : $item->quantity;
                 $line->save();
             }
@@ -372,12 +395,12 @@ class OrderService
         }
     }
 
-    private function releaseStock(Order $order): void
+    private function releaseStock(Order $order, ?User $actor): void
     {
         $items = $order->items()->where('reserved_quantity', '>', 0)->orderBy('product_id')->get();
         foreach ($items as $item) {
             if ($item->product_id) {
-                Product::withTrashed()->whereKey($item->product_id)->increment('stock_quantity', $item->reserved_quantity);
+                $this->inventory->release($order, $item->product_id, $item->variant_id, $item->reserved_quantity, $actor);
             }
             $item->reserved_quantity = 0;
             $item->save();

@@ -28,6 +28,7 @@ export function CartLine({ line, onChange, readOnly }) {
         <p className="font-medium text-stone-900">
           {line.product?.slug && line.kind === 'product' ? <Link to={`/products/${line.product.slug}`} className="hover:underline">{line.name}</Link> : line.name}
         </p>
+        {line.variant?.label && <p className="text-sm text-stone-700">{line.variant.label}</p>}
         <p className="text-sm text-stone-600">
           {line.kind === 'quote' ? `Custom quote, ${line.quantity} x ${formatETB(line.unit_price_santim)}` : `${formatETB(line.unit_price_santim)} each`}
           {line.product?.stock_type === 'made_to_order' && ` · made to order in ${line.product.production_days} days`}

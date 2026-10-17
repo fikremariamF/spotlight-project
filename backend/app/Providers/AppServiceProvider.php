@@ -77,6 +77,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('addresses', fn (Request $request) => Limit::perHour(30)->by('a|'.$request->user()?->id));
 
         // Profile edits (including email changes) are rare; this also slows down probing which emails exist.
+        // Stock adjustments and other ERP records: generous for a busy shop, but not a script.
+        RateLimiter::for('erp-writes', fn (Request $request) => Limit::perMinute(60)->by('e|'.$request->user()?->id));
         RateLimiter::for('account', fn (Request $request) => Limit::perHour(30)->by('p|'.$request->user()?->id));
 
         RateLimiter::for('catalog', fn (Request $request) => Limit::perMinute(config('marketplace.catalog.requests_per_minute'))->by($request->user()?->id ?: $request->ip()));

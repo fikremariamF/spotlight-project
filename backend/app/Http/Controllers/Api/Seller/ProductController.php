@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Models\SellerProfile;
 use App\Services\Alerts;
 use App\Services\AuditLogger;
+use App\Services\InventoryService;
 use App\Services\ProductImageService;
 use App\Support\Slug;
 use Illuminate\Http\JsonResponse;
@@ -27,7 +28,10 @@ use Illuminate\Validation\ValidationException;
  */
 class ProductController extends Controller
 {
-    public function __construct(private readonly ProductImageService $images) {}
+    public function __construct(
+        private readonly ProductImageService $images,
+        private readonly InventoryService $inventory,
+    ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -50,7 +54,7 @@ class ProductController extends Controller
 
     public function show(Request $request, int $id): ManagedProductResource
     {
-        $product = $this->findOwned($request, $id)->load(['images', 'category:id,name,slug', 'area:id,name']);
+        $product = $this->findOwned($request, $id)->load(['images', 'category:id,name,slug', 'area:id,name', 'variants']);
 
         return new ManagedProductResource($product);
     }
@@ -70,12 +74,17 @@ class ProductController extends Controller
         }
 
         $product = DB::transaction(function () use ($request, $profile, $submit, $audit) {
-            $product = new Product($this->normalizeStock($request->productAttributes()));
+            $data = $this->normalizeStock($request->productAttributes());
+            $stock = (int) ($data['stock_quantity'] ?? 0);
+            $product = new Product(['stock_quantity' => 0] + $data);
+            $product->stock_quantity = 0;
             $product->seller_profile_id = $profile->id;
             $product->slug = Slug::unique(Product::class, $request->input('name'));
             $product->status = $submit ? ProductStatus::PendingReview : ProductStatus::Draft;
             $product->area_id ??= $profile->area_id;
             $product->save();
+            // Starting stock goes through the stock history like every later change.
+            $this->inventory->setTotal($product, null, $stock, $request->user(), 'opening');
 
             $this->images->storeMany($product, $request->file('images', []));
 
@@ -93,15 +102,20 @@ class ProductController extends Controller
 
     public function update(ProductRequest $request, int $id, AuditLogger $audit): ManagedProductResource
     {
-        $this->profile($request, writable: true);
+        $profile = $this->profile($request, writable: true);
         $product = $this->findOwned($request, $id);
 
         if ($product->status === ProductStatus::Archived) {
             throw ValidationException::withMessages(['status' => 'Restore this listing before editing it.']);
         }
 
-        DB::transaction(function () use ($request, $product, $audit) {
-            $product->fill($this->normalizeStock($request->productAttributes(), $product));
+        DB::transaction(function () use ($request, $profile, $product, $audit) {
+            // Orders change stock at any time, so the stock number is decided on the locked row.
+            $product = $this->inventory->lock($profile->id, $product->id);
+            $data = $this->normalizeStock($request->productAttributes(), $product);
+            $stock = array_key_exists('stock_quantity', $data) ? (int) $data['stock_quantity'] : null;
+            unset($data['stock_quantity']);
+            $product->fill($data);
 
             if (! $product->offers_delivery && ! $product->pickup_available) {
                 throw ValidationException::withMessages(['offers_delivery' => 'Offer delivery, pickup, or both.']);
@@ -125,6 +139,27 @@ class ProductController extends Controller
             $changed = array_keys($product->getDirty());
             $product->save();
 
+            if ($product->stock_type === StockType::MadeToOrder && $product->wasChanged('stock_type')) {
+                $this->inventory->assertNothingOnTheWay($product, null, 'stock_type', 'This listing cannot become made to order yet');
+            }
+            if ($product->stock_type === StockType::MadeToOrder) {
+                // Made to order keeps no stock: whatever is left at the main location is written off the form.
+                foreach ($product->variants()->get() as $variant) {
+                    $this->inventory->setTotal($product, $variant, 0, $request->user());
+                }
+                if (! $this->inventory->hasVariants($product)) {
+                    $this->inventory->setTotal($product, null, 0, $request->user());
+                }
+            } elseif ($stock !== null && $stock !== $product->stock_quantity) {
+                // The form shows the stock as it was when opened; an order since then must not be undone by saving.
+                $expected = $request->input('stock_expected');
+                if ($expected !== null && (int) $expected !== $product->stock_quantity) {
+                    throw ValidationException::withMessages(['stock_quantity' => "Stock changed while you were editing (an order or another change). It is now {$product->stock_quantity}. Check the number and save again."]);
+                }
+                $this->inventory->setTotal($product, null, $stock, $request->user());
+                $changed[] = 'stock_quantity';
+            }
+
             if ($request->hasFile('images')) {
                 $this->images->storeMany($product, $request->file('images'));
             }
@@ -137,7 +172,7 @@ class ProductController extends Controller
             }
         });
 
-        return new ManagedProductResource($product->fresh(['images', 'category:id,name,slug']));
+        return new ManagedProductResource($product->fresh(['images', 'category:id,name,slug', 'variants']));
     }
 
     /**
@@ -182,9 +217,13 @@ class ProductController extends Controller
     public function destroy(Request $request, int $id, AuditLogger $audit): JsonResponse
     {
         $product = $this->findOwned($request, $id);
-        // Soft delete keeps the row for future order history; images stay until a cleanup job runs.
-        $product->delete();
-        $audit->log('product.deleted', $product);
+        DB::transaction(function () use ($product, $audit) {
+            $product = $this->inventory->lock($product->seller_profile_id, $product->id);
+            $this->inventory->assertNothingOnTheWay($product, null, 'product', 'This listing cannot be deleted yet');
+            // Soft delete keeps the row for future order history; images stay until a cleanup job runs.
+            $product->delete();
+            $audit->log('product.deleted', $product);
+        });
 
         return response()->json(['message' => 'Listing deleted.']);
     }

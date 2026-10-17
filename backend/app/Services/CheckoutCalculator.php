@@ -135,11 +135,19 @@ class CheckoutCalculator
         }
 
         $p = $item->product;
+        $v = $item->variant_id ? $item->variant : null;
         $problem = null;
-        $max = $p->stock_type === StockType::InStock ? (int) $p->stock_quantity : (int) config('marketplace.cart.max_quantity');
+        $stock = (int) ($v ? $v->stock_quantity : $p->stock_quantity);
+        $max = $p->stock_type === StockType::InStock ? $stock : (int) config('marketplace.cart.max_quantity');
+        $unitPrice = $v ? $v->priceSantim($p) : (int) $p->price_santim;
         if (! $visibleProductIds->has($p->id)) {
             $problem = 'This listing is no longer available.';
-        } elseif ($p->stock_type === StockType::InStock && $p->stock_quantity < 1) {
+        } elseif ($item->variant_id && (! $v || $v->trashed())) {
+            $problem = 'This option is no longer available. Remove it and pick another.';
+        } elseif (! $item->variant_id && $p->relationLoaded('variants') && $p->variants->isNotEmpty()) {
+            // Added before the store gave the listing options.
+            $problem = 'Choose a size, color or material for this item: remove it and add it again from the listing.';
+        } elseif ($p->stock_type === StockType::InStock && $stock < 1) {
             $problem = 'Out of stock.';
         } elseif ($item->quantity > $max) {
             $problem = "Only {$max} left. Lower the quantity.";
@@ -158,11 +166,12 @@ class CheckoutCalculator
                 'dimensions' => ['width_cm' => $p->width_cm, 'depth_cm' => $p->depth_cm, 'height_cm' => $p->height_cm],
             ],
             'quote' => null,
+            'variant' => $v ? ['id' => $v->id, 'label' => $v->label()] : null,
             'name' => $p->name,
-            'unit_price_santim' => $p->price_santim,
+            'unit_price_santim' => $unitPrice,
             'quantity' => $item->quantity,
             'max_quantity' => max(0, min($max, (int) config('marketplace.cart.max_quantity'))),
-            'line_total_santim' => $p->price_santim * $item->quantity,
+            'line_total_santim' => $unitPrice * $item->quantity,
             'problem' => $problem,
             'offers_delivery' => $p->offers_delivery,
             'pickup_available' => $p->pickup_available,
@@ -195,6 +204,7 @@ class CheckoutCalculator
             'kind' => 'quote',
             'product' => $p ? ['id' => $p->id, 'slug' => $p->slug, 'name' => $p->name, 'image' => null, 'stock_type' => null, 'production_days' => null] : null,
             'quote' => ['id' => $q->id, 'title' => $q->title, 'quantity' => $q->quantity, 'production_days' => $q->production_days, 'conversation_id' => $q->conversation_id, 'order_by' => $q->orderDeadline()->toIso8601String()],
+            'variant' => null,
             'name' => $q->title,
             'unit_price_santim' => $q->price_santim,
             'quantity' => $q->quantity,

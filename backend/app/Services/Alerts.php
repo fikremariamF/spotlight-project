@@ -9,6 +9,7 @@ use App\Models\Checkout;
 use App\Models\Conversation;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductVariant;
 use App\Models\Quote;
 use App\Models\Refund;
 use App\Models\Review;
@@ -390,6 +391,28 @@ class Alerts
                 title: 'Commission payment recorded: '.self::etb(abs($entry->amount_santim)),
                 body: 'You now owe '.self::etb(max(0, $balanceSantim)).'.',
                 url: '/seller/balance',
+                channels: ['database', 'mail'],
+            ));
+        });
+    }
+
+    /** A listing or one of its options reached its low-stock level, or ran out ($available 0). */
+    public function stockLow(Product $product, ?ProductVariant $variant, int $available): void
+    {
+        $this->afterCommit(function () use ($product, $variant, $available) {
+            $product = Product::with('seller.user')->find($product->id);
+            if (! $product) {
+                return;
+            }
+            $name = $product->name.($variant && $variant->label() !== '' ? ' ('.$variant->label().')' : '');
+            $reorder = $variant?->reorder_quantity ?? $product->reorder_quantity;
+            $out = $available === 0;
+            $this->notify($product->seller?->user, new Alert(
+                kind: $out ? 'stock.out' : 'stock.low',
+                title: $out ? "Out of stock: {$name}" : "Low stock: {$name}",
+                body: $out ? 'Customers can no longer buy it. Add stock when more arrives.'
+                    : self::plural($available, 'unit').' left'.($reorder ? ". Your usual reorder is {$reorder}." : '.'),
+                url: "/seller/erp/inventory/{$product->id}",
                 channels: ['database', 'mail'],
             ));
         });

@@ -25,14 +25,15 @@ final class Money
     }
 
     /**
-     * Format santim as a birr decimal string, e.g. 150050 -> "1500.50".
+     * Format santim as a birr decimal string, e.g. 150050 -> "1500.50", -150050 -> "-1500.50".
      */
     public static function toBirr(?int $santim): ?string
     {
         if ($santim === null) {
             return null;
         }
+        $abs = abs($santim);
 
-        return intdiv($santim, 100).'.'.str_pad((string) ($santim % 100), 2, '0', STR_PAD_LEFT);
+        return ($santim < 0 ? '-' : '').intdiv($abs, 100).'.'.str_pad((string) ($abs % 100), 2, '0', STR_PAD_LEFT);
     }
 }

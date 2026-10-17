@@ -25,6 +25,11 @@ class CartItem extends Model
         return $this->belongsTo(Product::class);
     }
 
+    public function variant(): BelongsTo
+    {
+        return $this->belongsTo(ProductVariant::class)->withTrashed();
+    }
+
     public function quote(): BelongsTo
     {
         return $this->belongsTo(Quote::class);

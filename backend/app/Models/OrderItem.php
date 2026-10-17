@@ -12,6 +12,7 @@ class OrderItem extends Model
     {
         return [
             'unit_price_santim' => 'integer',
+            'unit_cost_santim' => 'integer',
             'quantity' => 'integer',
             'line_total_santim' => 'integer',
             'production_days' => 'integer',
@@ -27,6 +28,11 @@ class OrderItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class)->withTrashed();
+    }
+
+    public function variant(): BelongsTo
+    {
+        return $this->belongsTo(ProductVariant::class)->withTrashed();
     }
 
     public function review(): HasOne
