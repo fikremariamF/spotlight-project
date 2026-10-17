@@ -5,10 +5,11 @@ namespace App\Models;
 use App\Enums\QuoteStatus;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-// conversation, seller and status are set by the controller.
+// conversation (old store chats) or support inquiry, seller and status are set by the code that creates it.
 #[Fillable(['product_id', 'title', 'description', 'price_santim', 'quantity', 'delivery_fee_santim', 'production_days', 'valid_until'])]
 class Quote extends Model
 {
@@ -20,6 +21,8 @@ class Quote extends Model
     {
         return [
             'status' => QuoteStatus::class,
+            'conversation_id' => 'integer',
+            'support_ticket_id' => 'integer',
             'price_santim' => 'integer',
             'delivery_fee_santim' => 'integer',
             'quantity' => 'integer',
@@ -29,9 +32,31 @@ class Quote extends Model
         ];
     }
 
+    /** Quotes from before support messaging: sent by the store in its chat with the customer. */
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
+    }
+
+    /** Offers Betoch sent on a store's behalf, inside the customer's support inquiry. */
+    public function supportTicket(): BelongsTo
+    {
+        return $this->belongsTo(SupportTicket::class);
+    }
+
+    public function sellerRequest(): BelongsTo
+    {
+        return $this->belongsTo(SellerRequest::class);
+    }
+
+    /**
+     * Quotes made out to this customer, through either path.
+     */
+    public function scopeForCustomer(Builder $query, int $customerId): void
+    {
+        $query->where(fn (Builder $q) => $q
+            ->whereHas('conversation', fn (Builder $c) => $c->where('customer_id', $customerId))
+            ->orWhereHas('supportTicket', fn (Builder $t) => $t->where('customer_id', $customerId)));
     }
 
     public function product(): BelongsTo

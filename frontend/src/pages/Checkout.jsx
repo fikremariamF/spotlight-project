@@ -20,7 +20,7 @@ function FitWarnings({ lines, space }) {
       {warnings.map(({ l, fit }) => (
         <li key={l.id} className={`text-xs ${fit.status === 'no' ? 'text-red-700' : 'text-amber-800'}`}>
           {l.name}: {fit.status === 'no'
-            ? `may not fit through your ${fit.checks.find((c) => c.status === 'no')?.label.toLowerCase() || 'door'}. Ask the seller whether it comes apart.`
+            ? `may not fit through your ${fit.checks.find((c) => c.status === 'no')?.label.toLowerCase() || 'door'}. Ask Betoch Support whether it comes apart.`
             : 'fits through your door, but only just.'}
         </li>
       ))}

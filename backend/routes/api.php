@@ -12,9 +12,11 @@ use App\Http\Controllers\Api\Admin\ProductModerationController;
 use App\Http\Controllers\Api\Admin\ReportController;
 use App\Http\Controllers\Api\Admin\ReviewController as AdminReviewController;
 use App\Http\Controllers\Api\Admin\SellerController as AdminSellerController;
+use App\Http\Controllers\Api\Admin\SellerRequestController as AdminSellerRequestController;
 use App\Http\Controllers\Api\Admin\SettingsController;
 use App\Http\Controllers\Api\Admin\SettlementController;
 use App\Http\Controllers\Api\Admin\SmsLogController;
+use App\Http\Controllers\Api\Admin\SupportController as AdminSupportController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CartController;
@@ -31,8 +33,10 @@ use App\Http\Controllers\Api\Seller\BalanceController;
 use App\Http\Controllers\Api\Seller\OrderController as SellerOrderController;
 use App\Http\Controllers\Api\Seller\ProductController as SellerProductController;
 use App\Http\Controllers\Api\Seller\ProfileController as SellerProfileController;
+use App\Http\Controllers\Api\Seller\RequestController as SellerRequestInboxController;
 use App\Http\Controllers\Api\Seller\ReviewController as SellerReviewController;
 use App\Http\Controllers\Api\Seller\SummaryController as SellerSummaryController;
+use App\Http\Controllers\Api\SupportController;
 use App\Models\Setting;
 use App\Payments\ChapaGateway;
 use App\Payments\FakeGateway;
@@ -46,7 +50,6 @@ Route::get('/config', fn () => response()->json([
     'currency' => config('marketplace.currency'),
     'max_product_images' => config('marketplace.products.max_images'),
     'max_image_kb' => config('marketplace.products.max_image_kb'),
-    'show_seller_phone' => config('marketplace.contact.show_seller_phone'),
     'cod_enabled' => Setting::codEnabled(),
     'online_payments' => [
         'available' => app(PaymentService::class)->available(),
@@ -131,7 +134,17 @@ Route::middleware(['auth:sanctum', 'role:customer'])->group(function () {
     Route::post('/addresses/{id}/default', [AddressController::class, 'setDefault'])->whereNumber('id');
     Route::delete('/addresses/{id}', [AddressController::class, 'destroy'])->whereNumber('id');
 
-    Route::post('/conversations', [ConversationController::class, 'store'])->middleware('throttle:inquiries');
+    // Questions go to Betoch support; customers never message stores directly.
+    Route::get('/support/tickets', [SupportController::class, 'index']);
+    Route::get('/support/unread-count', [SupportController::class, 'unreadCount']);
+    Route::post('/support/tickets', [SupportController::class, 'store'])->middleware('throttle:inquiries');
+    Route::get('/support/tickets/{id}', [SupportController::class, 'show'])->whereNumber('id');
+    Route::post('/support/tickets/{id}/messages', [SupportController::class, 'reply'])->whereNumber('id')->middleware('throttle:messages');
+    Route::post('/support/tickets/{id}/close', [SupportController::class, 'close'])->whereNumber('id');
+    // Old chats with stores, read-only.
+    Route::get('/conversations', [ConversationController::class, 'index']);
+    Route::get('/conversations/{id}', [ConversationController::class, 'show'])->whereNumber('id');
+
     Route::post('/quotes/{id}/accept', [QuoteController::class, 'accept'])->whereNumber('id');
     Route::post('/quotes/{id}/decline', [QuoteController::class, 'decline'])->whereNumber('id');
 
@@ -156,15 +169,6 @@ Route::middleware(['auth:sanctum', 'role:customer'])->group(function () {
     Route::put('/reviews/{id}', [ReviewController::class, 'update'])->whereNumber('id');
 });
 
-// Inquiries: customers and sellers each see only their own side
-Route::middleware(['auth:sanctum', 'role:customer,seller'])->group(function () {
-    Route::get('/conversations', [ConversationController::class, 'index']);
-    Route::get('/conversations/unread-count', [ConversationController::class, 'unreadCount']);
-    Route::get('/conversations/{id}', [ConversationController::class, 'show'])->whereNumber('id');
-    Route::post('/conversations/{id}/messages', [ConversationController::class, 'reply'])->whereNumber('id')->middleware('throttle:messages');
-    Route::post('/conversations/{id}/close', [ConversationController::class, 'close'])->whereNumber('id');
-});
-
 // Seller area
 Route::prefix('seller')->middleware(['auth:sanctum', 'role:seller'])->group(function () {
     Route::get('/summary', SellerSummaryController::class);
@@ -181,7 +185,12 @@ Route::prefix('seller')->middleware(['auth:sanctum', 'role:seller'])->group(func
     Route::post('/products/{id}/images', [SellerProductController::class, 'uploadImages'])->whereNumber('id')->middleware('throttle:uploads');
     Route::delete('/products/{id}/images/{imageId}', [SellerProductController::class, 'deleteImage'])->whereNumber(['id', 'imageId']);
 
-    Route::post('/conversations/{id}/quotes', [QuoteController::class, 'store'])->whereNumber('id')->middleware('throttle:messages');
+    // Requests from Betoch. Stores answer Betoch, never customers.
+    Route::get('/requests', [SellerRequestInboxController::class, 'index']);
+    Route::get('/requests/unread-count', [SellerRequestInboxController::class, 'unreadCount']);
+    Route::get('/requests/{id}', [SellerRequestInboxController::class, 'show'])->whereNumber('id');
+    Route::post('/requests/{id}/messages', [SellerRequestInboxController::class, 'reply'])->whereNumber('id')->middleware('throttle:messages');
+    // Quotes sent in the old store chats can still be withdrawn until they expire.
     Route::post('/quotes/{id}/withdraw', [QuoteController::class, 'withdraw'])->whereNumber('id');
 
     Route::get('/orders', [SellerOrderController::class, 'index']);
@@ -252,4 +261,21 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'role:admin'])->group(functi
     Route::get('/settings', [SettingsController::class, 'show']);
     Route::put('/settings', [SettingsController::class, 'update']);
     Route::get('/sms', [SmsLogController::class, 'index']);
+
+    // Support inbox
+    Route::get('/support/tickets', [AdminSupportController::class, 'index']);
+    Route::get('/support/tickets/{id}', [AdminSupportController::class, 'show'])->whereNumber('id');
+    Route::put('/support/tickets/{id}', [AdminSupportController::class, 'update'])->whereNumber('id');
+    Route::post('/support/tickets/{id}/messages', [AdminSupportController::class, 'reply'])->whereNumber('id')->middleware('throttle:staff-messages');
+    Route::post('/support/tickets/{id}/notes', [AdminSupportController::class, 'note'])->whereNumber('id')->middleware('throttle:staff-messages');
+    Route::get('/support/admins', [AdminSupportController::class, 'admins']);
+    Route::get('/support/requests', [AdminSellerRequestController::class, 'index']);
+    Route::post('/support/requests', [AdminSellerRequestController::class, 'store'])->middleware('throttle:staff-messages');
+    Route::get('/support/requests/{id}', [AdminSellerRequestController::class, 'show'])->whereNumber('id');
+    Route::post('/support/requests/{id}/messages', [AdminSellerRequestController::class, 'reply'])->whereNumber('id')->middleware('throttle:staff-messages');
+    Route::post('/support/requests/{id}/close', [AdminSellerRequestController::class, 'close'])->whereNumber('id');
+    Route::post('/support/requests/{id}/proposals/{messageId}/send', [AdminSellerRequestController::class, 'relay'])->whereNumber(['id', 'messageId']);
+    Route::post('/support/offers/{id}/withdraw', [AdminSellerRequestController::class, 'withdrawOffer'])->whereNumber('id');
+    Route::get('/support/old-chats', [AdminSupportController::class, 'legacyIndex']);
+    Route::get('/support/old-chats/{id}', [AdminSupportController::class, 'legacyShow'])->whereNumber('id');
 });

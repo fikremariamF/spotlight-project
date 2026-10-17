@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Enums\ProductStatus;
 use App\Enums\Role;
 use App\Enums\SellerStatus;
+use App\Enums\SupportStatus;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Order;
@@ -14,7 +15,9 @@ use App\Models\Refund;
 use App\Models\Review;
 use App\Models\SellerLedgerEntry;
 use App\Models\SellerProfile;
+use App\Models\SellerRequest;
 use App\Models\Setting;
+use App\Models\SupportTicket;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -50,6 +53,11 @@ class DashboardController extends Controller
             'refunds_due' => Refund::where('status', 'due')->count(),
             'reviews_hidden' => Review::where('is_hidden', true)->count(),
             'reviews_low' => Review::visible()->where('rating', '<=', 2)->where('created_at', '>=', now()->subDays(30))->count(),
+            'support' => [
+                'needs_reply' => SupportTicket::needsReply()->count(),
+                'escalated' => SupportTicket::whereIn('status', SupportStatus::activeValues())->whereNotNull('escalated_at')->count(),
+                'store_answers' => SellerRequest::where('status', SellerRequest::STATUS_ANSWERED)->count(),
+            ],
         ]]);
     }
 

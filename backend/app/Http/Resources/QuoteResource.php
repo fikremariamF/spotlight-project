@@ -18,6 +18,9 @@ class QuoteResource extends JsonResource
         return [
             'id' => $this->id,
             'conversation_id' => $this->conversation_id,
+            'support_ticket_id' => $this->support_ticket_id,
+            // Offers Betoch sends are fulfilled by a store; its name is public on the listing anyway.
+            'store' => $this->whenLoaded('seller', fn () => $this->seller ? ['store_name' => $this->seller->store_name, 'slug' => $this->seller->slug] : null),
             'product_id' => $this->product_id,
             'title' => $this->title,
             'description' => $this->description,

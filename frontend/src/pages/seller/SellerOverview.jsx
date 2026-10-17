@@ -1,7 +1,6 @@
 import { Plus } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Alert, CountLine, ErrorState, Spinner, Stats, TodoList } from '../../components/ui'
-import { useInbox } from '../../context/InboxContext'
 import { STATUS_LABELS, formatETB } from '../../lib/format'
 import { SELLER_ORDER_LABELS, StoreStatus, useSellerSummary } from './shared'
 
@@ -10,7 +9,6 @@ const money = (s) => formatETB(s) || 'ETB 0'
 export default function SellerOverview() {
   // The layout already loads /seller/summary for its menu counts; reuse it.
   const { data, error, reload } = useSellerSummary()
-  const { unread } = useInbox()
   if (error && !data) return <ErrorState error={error} onRetry={reload} />
   if (!data) return <Spinner />
   const s = data.data
@@ -35,7 +33,7 @@ export default function SellerOverview() {
         <h2 id="todo" className="mb-2 text-sm font-semibold text-stone-500">To do</h2>
         <TodoList items={[
           [s.orders.pending_confirmation, 'order waiting for your confirmation', 'orders waiting for your confirmation', '/seller/orders?status=pending_confirmation'],
-          [unread, 'unread message', 'unread messages', '/messages'],
+          [s.requests?.waiting, 'request from Betoch waiting for your answer', 'requests from Betoch waiting for your answer', '/seller/requests'],
           [s.products.rejected, 'listing needs changes', 'listings need changes', '/seller/listings?status=rejected'],
           approved && [s.products.draft, 'draft not sent for review yet', 'drafts not sent for review yet', '/seller/listings?status=draft'],
           [s.reviews.low_unanswered, 'low rating without your reply', 'low ratings without your reply', '/seller/reviews?unanswered=1'],

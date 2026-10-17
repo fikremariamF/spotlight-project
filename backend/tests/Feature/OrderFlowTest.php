@@ -65,8 +65,10 @@ class OrderFlowTest extends TestCase
 
         $this->getJson('/api/seller/orders')->assertOk()->assertJsonPath('data.0.number', $order->number)
             ->assertJsonPath('data.0.commission_santim', 200_000);
+        // The street and phone come with accepting the order.
         $this->getJson("/api/seller/orders/{$order->id}")->assertOk()
-            ->assertJsonPath('data.delivery_address.address_line', 'House 12')
+            ->assertJsonPath('data.delivery_address.address_line', null)
+            ->assertJsonPath('data.delivery_address.contact_hidden', true)
             ->assertJsonPath('data.delivery_fee_confirmed', false);
 
         // Fee is required when nobody set one.
@@ -76,7 +78,8 @@ class OrderFlowTest extends TestCase
             ->assertJsonPath('data.status', 'confirmed')
             ->assertJsonPath('data.delivery_fee_santim', 45_000)
             ->assertJsonPath('data.total_santim', 2_045_000)
-            ->assertJsonPath('data.seller_note', 'Ready Friday');
+            ->assertJsonPath('data.seller_note', 'Ready Friday')
+            ->assertJsonPath('data.delivery_address.address_line', 'House 12');
         $this->postJson("/api/seller/orders/{$order->id}/confirm", ['delivery_fee' => '1'])->assertUnprocessable();
 
         foreach (['processing', 'ready', 'dispatched'] as $status) {

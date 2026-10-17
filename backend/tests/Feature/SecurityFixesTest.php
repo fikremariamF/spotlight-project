@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
+use Tests\Concerns\MakesSupportData;
 use Tests\Concerns\PlacesOrders;
 use Tests\TestCase;
 
@@ -22,7 +23,7 @@ use Tests\TestCase;
  */
 class SecurityFixesTest extends TestCase
 {
-    use PlacesOrders, RefreshDatabase;
+    use MakesSupportData, PlacesOrders, RefreshDatabase;
 
     protected function setUp(): void
     {
@@ -52,7 +53,19 @@ class SecurityFixesTest extends TestCase
     public function test_the_store_sees_the_delivery_address_only_while_it_can_deliver(): void
     {
         $order = $this->placeOrder(1);
-        $this->assertSame('House 12', $this->storeView($order)['delivery_address']['address_line']);
+        // Before the store accepts the order it sees where (area, floor, lift, distance), not who or the street.
+        $address = $this->storeView($order)['delivery_address'];
+        $this->assertTrue($address['contact_hidden']);
+        $this->assertSame($this->area()->name, $address['area']);
+        foreach (['recipient_name', 'phone', 'address_line', 'landmark', 'latitude', 'longitude'] as $field) {
+            $this->assertNull($address[$field], $field);
+        }
+        $this->as($this->seller->user)->getJson('/api/seller/orders')->assertOk()->assertJsonMissing(['phone' => '+251911000111'])
+            ->assertJsonMissing(['address_line' => 'House 12']);
+
+        $this->as($this->seller->user)->postJson("/api/seller/orders/{$order->id}/confirm")->assertOk()
+            ->assertJsonPath('data.delivery_address.address_line', 'House 12')
+            ->assertJsonPath('data.delivery_address.contact_hidden', false);
 
         // Suspended: hidden, and back once the store is active again.
         $this->seller->forceFill(['status' => SellerStatus::Suspended])->save();
@@ -60,45 +73,60 @@ class SecurityFixesTest extends TestCase
         $this->seller->forceFill(['status' => SellerStatus::Approved])->save();
         $this->assertSame('+251911000111', $this->storeView($order)['delivery_address']['phone']);
 
-        // Cancelled: hidden from the store for good, still shown to the customer and the admin.
+        // Delivered: the store keeps the area but no longer the customer's contact.
+        foreach (['processing', 'ready', 'dispatched'] as $status) {
+            $this->postJson("/api/seller/orders/{$order->id}/status", ['status' => $status])->assertOk();
+            $this->assertSame('House 12', $this->storeView($order)['delivery_address']['address_line'], $status);
+        }
+        $this->postJson("/api/seller/orders/{$order->id}/status", ['status' => 'delivered'])->assertOk();
+        $this->assertNull($this->storeView($order)['delivery_address']['phone']);
+        $this->as($this->buyer)->getJson("/api/orders/{$order->id}")->assertOk()->assertJsonPath('data.delivery_address.address_line', 'House 12')
+            ->assertJsonPath('data.delivery_address.contact_hidden', false);
+    }
+
+    public function test_a_cancelled_order_hides_the_address_from_the_store_for_good(): void
+    {
+        $order = $this->placeOrder(1);
+        $this->as($this->seller->user)->postJson("/api/seller/orders/{$order->id}/confirm")->assertOk();
+
         $this->as($this->buyer)->postJson("/api/orders/{$order->id}/cancel", ['reason' => 'Changed my mind'])->assertOk();
         $this->assertNull($this->storeView($order)['delivery_address']);
         $this->as($this->buyer)->getJson("/api/orders/{$order->id}")->assertOk()->assertJsonPath('data.delivery_address.address_line', 'House 12');
         $this->as($this->admin())->getJson("/api/admin/orders/{$order->id}")->assertOk()->assertJsonPath('data.delivery_address.address_line', 'House 12');
     }
 
-    private function quoteConversation(): int
+    private function proposal(?string $fee): TestResponse
     {
         $this->seller->forceFill(['offers_custom_orders' => true])->save();
-
-        return $this->as($this->buyer)->postJson('/api/conversations', [
-            'seller_slug' => $this->seller->slug, 'type' => 'custom_request', 'body' => 'A wardrobe please',
+        $ticket = $this->actAs($this->buyer)->postJson('/api/support/tickets', [
+            'topic' => 'custom', 'seller_slug' => $this->seller->slug, 'body' => 'A wardrobe please',
         ])->assertCreated()->json('data.id');
-    }
+        $request = $this->actAs($this->admin())->postJson('/api/admin/support/requests', [
+            'support_ticket_id' => $ticket, 'seller_profile_id' => $this->seller->id, 'topic' => 'price',
+            'subject' => 'Wardrobe price', 'body' => 'How much for a walnut wardrobe?',
+        ])->assertCreated()->json('data.id');
 
-    private function sendQuote(int $conversationId, ?string $fee): TestResponse
-    {
-        return $this->as($this->seller->user)->postJson("/api/seller/conversations/{$conversationId}/quotes", [
-            'title' => 'Wardrobe', 'description' => 'Walnut, 240cm.', 'price' => '20000', 'quantity' => 1,
-            'delivery_fee' => $fee, 'valid_until' => now()->addDays(5)->toDateString(),
+        return $this->actAs($this->seller->user)->postJson("/api/seller/requests/$request/messages", [
+            'body' => 'Here is our price.',
+            'proposal' => ['price' => '20000', 'quantity' => 1, 'delivery_fee' => $fee, 'valid_until' => now()->addDays(5)->toDateString()],
         ]);
     }
 
-    public function test_a_quote_cannot_carry_a_delivery_fee_while_the_marketplace_sets_them(): void
+    public function test_a_proposal_cannot_carry_a_delivery_fee_while_the_marketplace_sets_them(): void
     {
         Setting::updateOrCreate(['key' => 'stores_set_delivery_fee'], ['value' => '0']);
-        $id = $this->quoteConversation();
 
-        $this->sendQuote($id, '5000')->assertUnprocessable()->assertJsonValidationErrors('delivery_fee');
-        $this->sendQuote($id, '0')->assertCreated()->assertJsonPath('data.delivery_fee_santim', 0);
-        $this->sendQuote($id, null)->assertCreated();
+        $this->proposal('5000')->assertUnprocessable()->assertJsonValidationErrors('delivery_fee');
+        $this->proposal('0')->assertCreated()->assertJsonPath('data.messages.1.proposal.delivery_fee_santim', 0);
+        $this->proposal(null)->assertCreated()->assertJsonPath('data.messages.1.proposal.delivery_fee_santim', null);
     }
 
     public function test_an_earlier_quote_fee_is_ignored_once_the_switch_is_off(): void
     {
-        $id = $this->quoteConversation();
-        $quoteId = $this->sendQuote($id, '5000')->assertCreated()->json('data.id');
-        $this->as($this->buyer)->postJson("/api/quotes/{$quoteId}/accept")->assertOk();
+        Setting::updateOrCreate(['key' => 'stores_set_delivery_fee'], ['value' => '1']);
+        $chat = $this->oldConversation($this->buyer, $this->seller);
+        $quoteId = $this->oldQuote($chat, ['delivery_fee_santim' => 500_000])->id;
+        $this->actAs($this->buyer)->postJson("/api/quotes/{$quoteId}/accept")->assertOk();
         $this->postJson("/api/quotes/{$quoteId}/add-to-cart")->assertCreated();
 
         $fee = fn () => $this->getJson('/api/cart?address_id='.$this->address->id)->json('data.groups.0.delivery_fee_santim');

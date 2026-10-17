@@ -51,7 +51,7 @@ export function Notifications() {
     <div className="container-page max-w-3xl py-8">
       <PageHeader
         title="Alerts"
-        subtitle="Order updates, quotes and store news. Messages have their own inbox."
+        subtitle="Order updates, offers and store news. Answers from Betoch Support also show in Support."
         actions={(
           <>
             <button type="button" className="btn-secondary" onClick={markAll} disabled={unread === 0}>Mark all as read</button>
@@ -181,7 +181,7 @@ function AlertSettingsForm({ settings }) {
           <div>
             <label htmlFor="alert-email" className="font-medium">Email</label>
             <p id="alert-email-help" className="text-stone-600">
-              Order updates, new messages and quotes, sent to <strong className="break-all">{info.email}</strong>. At most one email per conversation every 30 minutes.
+              Order updates, support answers and offers, sent to <strong className="break-all">{info.email}</strong>. At most one email per inquiry every 30 minutes.
             </p>
           </div>
         </div>

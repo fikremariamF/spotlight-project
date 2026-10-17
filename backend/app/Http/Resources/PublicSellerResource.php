@@ -7,7 +7,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * What guests see about a seller. No TIN, owner email or review notes.
+ * What guests see about a seller. No TIN, owner email, review notes or phone: customers reach
+ * stores only through Betoch support.
  *
  * @mixin SellerProfile
  */
@@ -21,7 +22,6 @@ class PublicSellerResource extends JsonResource
             'slug' => $this->slug,
             'description' => $this->description,
             'business_type' => $this->business_type->value,
-            'phone' => config('marketplace.contact.show_seller_phone') ? $this->phone : null,
             'city' => $this->whenLoaded('city', fn () => $this->city?->name),
             'area' => $this->whenLoaded('area', fn () => $this->area?->name),
             'offers_custom_orders' => $this->offers_custom_orders,

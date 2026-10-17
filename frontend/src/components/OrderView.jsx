@@ -1,4 +1,4 @@
-import { MapPin } from 'lucide-react'
+import { LifeBuoy, MapPin } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ProductImage } from './ProductCard'
 import { ORDER_STATUS_TONES, formatDateTime, formatETB, orderStatusLabel, paymentSummary } from '../lib/format'
@@ -111,8 +111,21 @@ export default function OrderView({ order, viewer, actions, itemExtra }) {
         {a && (
           <section className="card p-4 text-sm">
             <h3 className="mb-1 font-semibold text-stone-700">{order.fulfillment === 'pickup' ? 'Customer contact' : 'Delivery address'}</h3>
-            <p>{a.recipient_name}, {a.phone}</p>
-            {order.fulfillment === 'delivery' && <p>{a.address_line}, {a.area}</p>}
+            {a.contact_hidden ? (
+              <>
+                {order.fulfillment === 'delivery' && <p>{a.area}</p>}
+                <p className="text-stone-500">
+                  {['pending_confirmation', 'awaiting_payment'].includes(order.status)
+                    ? 'The name, phone and street appear once you confirm the order.'
+                    : 'The customer\'s contact details are no longer shown. Ask Betoch Support if you need to reach them.'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p>{a.recipient_name}, {a.phone}</p>
+                {order.fulfillment === 'delivery' && <p>{a.address_line}, {a.area}</p>}
+              </>
+            )}
             {order.fulfillment === 'delivery' && a.landmark && <p className="text-stone-500">Landmark: {a.landmark}</p>}
             {order.fulfillment === 'delivery' && a.floor > 0 && <p className="text-stone-500">Floor {a.floor}, {a.has_lift ? 'with a lift' : a.has_lift === false ? 'no lift' : 'lift not known'}</p>}
             {order.fulfillment === 'delivery' && a.latitude != null && (
@@ -127,7 +140,8 @@ export default function OrderView({ order, viewer, actions, itemExtra }) {
           <section className="card p-4 text-sm">
             <h3 className="mb-1 font-semibold text-stone-700">Seller</h3>
             <p>{order.seller.store_name}{order.seller.area && `, ${order.seller.area}`}</p>
-            {order.seller.phone && <p>Phone: {order.seller.phone}</p>}
+            <Link to={`/support/new?order=${order.id}`} className="btn-secondary mt-3 w-full justify-center"><LifeBuoy className="size-4" aria-hidden="true" />Get help with this order</Link>
+            <p className="mt-2 text-xs text-stone-500">Betoch Support handles questions, returns and refunds, and checks with the store for you.</p>
           </section>
         )}
       </aside>

@@ -57,6 +57,46 @@ export const INQUIRY_TYPES = {
   custom_request: 'Custom request',
 }
 
+// Support inquiries: what customers ask Betoch, and what Betoch asks a store.
+export const SUPPORT_STATUS_LABELS = {
+  new: 'New',
+  open: 'Open',
+  waiting: 'Waiting for information',
+  resolved: 'Resolved',
+  closed: 'Closed',
+}
+
+export const SUPPORT_STATUS_TONES = {
+  new: 'bg-amber-100 text-amber-800',
+  open: 'bg-sky-100 text-sky-800',
+  waiting: 'bg-violet-100 text-violet-800',
+  resolved: 'bg-emerald-100 text-emerald-800',
+  closed: 'bg-stone-200 text-stone-700',
+}
+
+export const SUPPORT_TOPICS = {
+  product: 'Product question',
+  availability: 'Availability',
+  price: 'Price or offer',
+  custom: 'Custom order',
+  delivery: 'Delivery',
+  order: 'My order',
+  return: 'Return',
+  refund: 'Refund',
+  other: 'Something else',
+}
+
+export const REQUEST_TOPICS = {
+  stock: 'Stock check',
+  specs: 'Product details',
+  price: 'Price or custom offer',
+  delivery: 'Delivery arrangements',
+  fulfilment: 'Order fulfilment',
+  other: 'Something else',
+}
+
+export const REQUEST_STATUS_LABELS = { open: 'Waiting for the store', answered: 'Store answered', closed: 'Closed' }
+
 export const QUOTE_STATUS_LABELS = {
   pending: 'Waiting for your answer',
   accepted: 'Accepted',

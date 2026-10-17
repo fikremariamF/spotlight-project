@@ -83,7 +83,7 @@ export default function Cart() {
       {error && <div className="mb-4"><Alert tone="error">{error}</Alert></div>}
       {c.line_count === 0 ? (
         <EmptyState title="Your cart is empty" action={<Link to="/search" className="btn-primary">Browse furniture</Link>}>
-          Add furniture from any listing, or order a custom quote you accepted in Messages.
+          Add furniture from any listing, or order an offer you accepted in Support.
         </EmptyState>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr_280px]">

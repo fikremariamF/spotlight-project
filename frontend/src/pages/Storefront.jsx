@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams, useParams } from 'react-router-dom'
-import ContactSeller from '../components/ContactSeller'
+import AskSupport from '../components/AskSupport'
 import { ProductGrid } from '../components/ProductCard'
 import { EmptyState, ErrorState, Pagination, Spinner } from '../components/ui'
 import { BUSINESS_TYPES, toQuery } from '../lib/format'
@@ -36,11 +36,10 @@ export default function Storefront() {
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            {!contactOpen && <button type="button" className="btn-primary" onClick={() => setContactOpen(true)}>Message store</button>}
-            {s.phone && <a href={`tel:${s.phone.replace(/\s/g, '')}`} className="btn-secondary">Call {s.phone}</a>}
+            {!contactOpen && <button type="button" className="btn-primary" onClick={() => setContactOpen(true)}>Ask about this store</button>}
           </div>
         </div>
-        {contactOpen && <div className="mt-4 max-w-xl"><ContactSeller seller={s} onCancel={() => setContactOpen(false)} /></div>}
+        {contactOpen && <div className="mt-4 max-w-xl"><AskSupport seller={s} title={`Ask Betoch about ${s.store_name}`} onCancel={() => setContactOpen(false)} /></div>}
       </header>
 
       <h2 className="mb-4 text-lg font-bold text-stone-900">Listings ({s.products_count})</h2>

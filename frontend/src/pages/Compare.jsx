@@ -10,7 +10,7 @@ import { api, parseError } from '../lib/api'
 import { CONDITION_LABELS, formatDimensions, formatETB } from '../lib/format'
 
 function deliveryText(p) {
-  if (!p.delivery.offers_delivery) return p.delivery.pickup_available ? 'Pickup only' : 'Ask the seller'
+  if (!p.delivery.offers_delivery) return p.delivery.pickup_available ? 'Pickup only' : 'Ask Betoch Support'
   const fee = p.delivery.fee_santim === null ? 'fee set by seller' : p.delivery.fee_santim === 0 ? 'free' : formatETB(p.delivery.fee_santim)
   return `Delivery, ${fee}${p.delivery.pickup_available ? '; pickup too' : ''}`
 }

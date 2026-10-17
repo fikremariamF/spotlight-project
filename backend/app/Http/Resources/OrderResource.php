@@ -67,8 +67,8 @@ class OrderResource extends JsonResource
                 'id' => $this->seller->id,
                 'store_name' => $this->seller->store_name,
                 'slug' => $this->seller->slug,
-                // The customer needs the store's phone to arrange delivery once they have ordered.
-                'phone' => $this->seller->phone,
+                // Customers reach the store through Betoch support; the store calls them while delivering.
+                'phone' => $this->when($this->viewer !== 'customer', fn () => $this->seller->phone),
                 'area' => $this->seller->relationLoaded('area') ? $this->seller->area?->name : null,
             ]),
             'customer' => $this->whenLoaded('customer', fn () => [
@@ -76,18 +76,7 @@ class OrderResource extends JsonResource
                 'name' => $this->customer->name,
                 'email' => $this->when($this->viewer === 'admin', $this->customer->email),
             ]),
-            'delivery_address' => $checkout instanceof Checkout && ! $this->hideAddressFromStore() ? [
-                'recipient_name' => $checkout->recipient_name,
-                'phone' => $checkout->phone,
-                'area' => $checkout->area_name,
-                'address_line' => $checkout->address_line,
-                'landmark' => $checkout->landmark,
-                // The pin lets the store open turn-by-turn directions.
-                'latitude' => $checkout->latitude === null ? null : (float) $checkout->latitude,
-                'longitude' => $checkout->longitude === null ? null : (float) $checkout->longitude,
-                'floor' => $checkout->floor,
-                'has_lift' => $checkout->has_lift === null ? null : (bool) $checkout->has_lift,
-            ] : null,
+            'delivery_address' => $checkout instanceof Checkout && ! $this->hideAddressFromStore() ? $this->address($checkout) : null,
             'items' => $this->whenLoaded('items', fn () => $this->items->map(fn ($i) => [
                 'id' => $i->id,
                 'name' => $i->name,
@@ -127,8 +116,8 @@ class OrderResource extends JsonResource
     }
 
     /**
-     * A store sees the customer's phone and home pin only while it can still deliver: not once the
-     * order is cancelled, and not while the store itself is suspended or otherwise not approved.
+     * A store sees nothing of the delivery address once the order is cancelled, or while the store
+     * itself is suspended or otherwise not approved.
      */
     private function hideAddressFromStore(): bool
     {
@@ -140,5 +129,33 @@ class OrderResource extends JsonResource
         return $this->status === OrderStatus::Cancelled
             || ! $this->relationLoaded('seller')
             || $this->seller?->isApproved() !== true;
+    }
+
+    /**
+     * The customer's name, phone, street and pin go to a store only while it is fulfilling the order
+     * (confirmed until handed over). Before it confirms it sees the area, floor and lift to plan
+     * delivery; after delivery it no longer needs them. Customers and admins always see everything.
+     *
+     * @return array<string, mixed>
+     */
+    private function address(Checkout $checkout): array
+    {
+        $private = $this->viewer !== 'seller' || in_array($this->status, [
+            OrderStatus::Confirmed, OrderStatus::Processing, OrderStatus::Ready, OrderStatus::Dispatched,
+        ], true);
+
+        return [
+            'recipient_name' => $private ? $checkout->recipient_name : null,
+            'phone' => $private ? $checkout->phone : null,
+            'area' => $checkout->area_name,
+            'address_line' => $private ? $checkout->address_line : null,
+            'landmark' => $private ? $checkout->landmark : null,
+            // The pin lets the store open turn-by-turn directions.
+            'latitude' => $private && $checkout->latitude !== null ? (float) $checkout->latitude : null,
+            'longitude' => $private && $checkout->longitude !== null ? (float) $checkout->longitude : null,
+            'floor' => $checkout->floor,
+            'has_lift' => $checkout->has_lift === null ? null : (bool) $checkout->has_lift,
+            'contact_hidden' => ! $private,
+        ];
     }
 }

@@ -41,12 +41,6 @@ return [
         'reapprove_on_edit' => (bool) env('MARKETPLACE_REAPPROVE_ON_EDIT', true),
     ],
 
-    'contact' => [
-        // Public store phone numbers let buyers skip the platform (and its commission). Set to false
-        // once in-app inquiries are the main contact route.
-        'show_seller_phone' => (bool) env('MARKETPLACE_SHOW_SELLER_PHONE', true),
-    ],
-
     // Default only: administrators change the live rate in Admin > Settings. Each order stores
     // the rate used when it was placed, so changes never rewrite past orders.
     'commission' => [
@@ -88,10 +82,10 @@ return [
         'sms_driver' => env('MARKETPLACE_SMS_DRIVER', 'log'),
         // Starting value for the Admin > Settings switch that pauses all SMS.
         'sms_enabled' => (bool) env('MARKETPLACE_SMS_ENABLED', true),
-        // At most one "new message" email per conversation and recipient in this many minutes.
+        // At most one email per support inquiry (or store request) and recipient in this many minutes.
         'message_email_cooldown_minutes' => 30,
-        // At most one "new inquiry" SMS per customer and store in this many hours.
-        'inquiry_sms_cooldown_hours' => 24,
+        // At most one "Betoch has a question" SMS per store in this many hours.
+        'store_request_sms_cooldown_hours' => 24,
     ],
 
     'cart' => [

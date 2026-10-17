@@ -16,12 +16,13 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
+use Tests\Concerns\MakesSupportData;
 use Tests\Concerns\PlacesOrders;
 use Tests\TestCase;
 
 class AlertTest extends TestCase
 {
-    use PlacesOrders, RefreshDatabase;
+    use MakesSupportData, PlacesOrders, RefreshDatabase;
 
     /** @var list<array{user: int, kind: string, channel: string}> */
     private array $sent = [];
@@ -218,63 +219,76 @@ class AlertTest extends TestCase
         $this->assertSame(3, DB::table('jobs')->count(), 'seller email, seller SMS, customer receipt');
     }
 
-    public function test_messages_email_with_a_cooldown_and_new_inquiries_also_text_the_store_once_a_day(): void
+    public function test_support_messages_email_with_a_cooldown_and_new_store_requests_text_the_store_once_a_day(): void
     {
-        $seller = $this->seller->user;
-        $start = fn (Product $p) => $this->as($this->buyer)->postJson('/api/conversations', ['product_slug' => $p->slug, 'type' => 'question', 'body' => 'Is this available in grey?'])->json('data.id');
+        $admin = $this->admin();
+        $store = $this->seller->user;
+        $ticket = $this->askSupport($this->buyer, ['product_slug' => $this->sofa->slug])->assertCreated()->json('data.id');
+        // Every admin sees the new inquiry in the app; the store hears nothing about it.
+        $this->assertSame(['database'], $this->channels($admin, 'support.new'));
+        $this->assertSame([], $this->kinds($store));
 
-        $id = $start($this->sofa);
-        $this->assertSame(['mail', 'sms'], $this->channels($seller, 'message.inquiry'));
-        $this->assertSame([], $this->channels($seller, 'message.new'));
+        // Betoch's answer emails the customer once inside the cooldown; the Support badge shows the rest.
+        $this->actAs($admin)->postJson("/api/admin/support/tickets/$ticket/messages", ['body' => 'Yes, in grey.'])->assertCreated();
+        $this->postJson("/api/admin/support/tickets/$ticket/messages", ['body' => 'Delivery is 300 birr.'])->assertCreated();
+        $this->assertSame(['mail'], $this->channels($this->buyer, 'support.reply'));
 
-        // A follow-up from the customer inside the cooldown sends nothing more.
-        $this->postJson("/api/conversations/{$id}/messages", ['body' => 'Also, what about delivery?'])->assertCreated();
-        $this->assertSame([], $this->channels($seller, 'message.new'));
+        // The customer's replies reach the admin who took it (the first reply assigned it).
+        $this->actAs($this->buyer)->postJson("/api/support/tickets/$ticket/messages", ['body' => 'Great, and the legs?'])->assertCreated();
+        $this->postJson("/api/support/tickets/$ticket/messages", ['body' => 'Oak if possible.'])->assertCreated();
+        $this->assertSame(['database', 'database', 'mail'], $this->channels($admin, 'support.customer_replied'));
 
-        // The store's reply emails the customer once.
-        $this->as($seller)->postJson("/api/conversations/{$id}/messages", ['body' => 'Yes, in grey.'])->assertCreated();
-        $this->postJson("/api/conversations/{$id}/messages", ['body' => 'Delivery is 300 birr.'])->assertCreated();
-        $this->assertSame(['mail'], $this->channels($this->buyer, 'message.new'));
+        // Asking the store: in the app, by email, and one text a day. Follow-ups never text.
+        $ask = fn () => $this->actAs($admin)->postJson('/api/admin/support/requests', [
+            'support_ticket_id' => $ticket, 'seller_profile_id' => $this->seller->id, 'topic' => 'specs',
+            'subject' => 'Leg wood for '.$this->buyer->name, 'body' => 'Can the legs be oak?',
+        ])->assertCreated()->json('data.id');
+        $request = $ask();
+        $this->assertSame(['database', 'mail', 'sms'], $this->channels($store, 'store_request.new'));
+        $sms = SmsMessage::where('kind', 'store_request.new')->sole();
+        $this->assertSame($this->seller->phone, $sms->to);
+        $this->assertStringContainsString('/seller/requests/'.$request, $sms->body);
+        // The subject the admin typed is not texted.
+        $this->assertStringNotContainsString($this->buyer->name, $sms->body);
 
-        // A new inquiry about another listing emails again but does not text the store again today.
-        $chair = Product::factory()->published()->create(['seller_profile_id' => $this->seller->id, 'category_id' => $this->category()->id]);
         $this->sent = [];
-        $start($chair);
-        $this->assertSame(['mail'], $this->channels($seller, 'message.inquiry'));
-
+        $this->postJson("/api/admin/support/requests/$request/messages", ['body' => 'Any update?'])->assertCreated();
+        $this->assertSame(['database'], $this->channels($store, 'store_request.new'));
+        $this->sent = [];
+        $ask();
+        $this->assertSame(['database', 'mail'], $this->channels($store, 'store_request.new'));
         $this->travel(25)->hours();
-        $other = Product::factory()->published()->create(['seller_profile_id' => $this->seller->id, 'category_id' => $this->category()->id]);
         $this->sent = [];
-        $start($other);
-        $this->assertSame(['mail', 'sms'], $this->channels($seller, 'message.inquiry'));
+        $ask();
+        $this->assertSame(['database', 'mail', 'sms'], $this->channels($store, 'store_request.new'));
+        $this->assertSame(2, SmsMessage::where('kind', 'store_request.new')->count());
 
-        // Replies never text anyone, even once the daily inquiry text is free again.
-        $this->travel(25)->hours();
+        // The store's answer reaches the admin, never the customer.
         $this->sent = [];
-        $this->as($this->buyer)->postJson("/api/conversations/{$id}/messages", ['body' => 'Still there?'])->assertCreated();
-        $this->as($seller)->postJson("/api/conversations/{$id}/messages", ['body' => 'Yes.'])->assertCreated();
-        $this->assertSame(['mail'], $this->channels($seller, 'message.new'));
-        $this->assertSame(['mail'], $this->channels($this->buyer, 'message.new'));
+        $this->actAs($store)->postJson("/api/seller/requests/$request/messages", ['body' => 'Yes, oak is fine.'])->assertCreated();
+        $this->assertSame(['database', 'mail'], $this->channels($admin, 'store_request.answered'));
+        $this->assertSame([], $this->kinds($this->buyer));
     }
 
-    public function test_quotes_alert_through_the_quote_not_as_messages(): void
+    public function test_offers_alert_the_customer_and_answers_reach_the_store_without_the_customer_name(): void
     {
-        $seller = $this->seller->user;
+        $admin = $this->admin();
         $this->seller->forceFill(['offers_custom_orders' => true])->save();
-        $this->sofa->forceFill(['custom_order_available' => true])->save();
-        $id = $this->as($this->buyer)->postJson('/api/conversations', ['product_slug' => $this->sofa->slug, 'type' => 'custom_request', 'body' => 'Can you make it 9,000?'])->assertCreated()->json('data.id');
+        $ticket = $this->askSupport($this->buyer, ['topic' => 'custom', 'seller_slug' => $this->seller->slug, 'body' => 'Can you make it 9,000?'])->json('data.id');
         $this->sent = [];
 
-        $quoteId = $this->as($seller)->postJson("/api/seller/conversations/{$id}/quotes", [
-            'title' => 'Sofa at a better price', 'description' => 'Same sofa, delivered next week.', 'price' => '9000', 'valid_until' => now()->addDays(3)->toDateString(),
-        ])->assertCreated()->json('data.id');
+        ['quote' => $quoteId] = $this->relayOffer($ticket, $admin, $this->seller);
         $this->assertSame(['database', 'mail'], $this->channels($this->buyer, 'quote.new'));
-        $this->assertSame([], $this->channels($this->buyer, 'message.new'));
+        $this->actAs($this->buyer)->getJson('/api/notifications')->assertJsonPath('data.0.title', 'Betoch sent you an offer')
+            ->assertJsonPath('data.0.url', "/support/$ticket");
+        // The offer line in the inquiry does not also send a "new reply" email.
+        $this->assertSame([], $this->channels($this->buyer, 'support.reply'));
 
-        $this->as($this->buyer)->postJson("/api/quotes/{$quoteId}/accept")->assertOk();
-        $this->assertSame(['database', 'mail'], $this->channels($seller, 'quote.answered'));
-        $this->assertSame([], $this->channels($seller, 'message.new'));
-        $this->as($seller)->getJson('/api/notifications')->assertJsonPath('data.0.title', $this->buyer->name.' accepted your quote');
+        $this->postJson("/api/quotes/{$quoteId}/accept")->assertOk();
+        $this->assertSame(['database', 'mail'], $this->channels($this->seller->user, 'quote.answered'));
+        $this->assertSame(['database'], $this->channels($admin, 'support.offer_answered'));
+        $this->actAs($this->seller->user)->getJson('/api/notifications')->assertJsonPath('data.0.title', 'The customer accepted your offer');
+        $this->assertStringNotContainsString($this->buyer->name, json_encode($this->seller->user->notifications()->pluck('data')));
     }
 
     public function test_store_applications_and_reviews_alert_admins_and_sellers(): void
@@ -401,9 +415,9 @@ class AlertTest extends TestCase
         $this->buyer->forceFill(['name' => 'Eve [Claim your refund](https://evil.example/login)'])->save();
         $mail = (new Alert(
             kind: 'quote.new',
-            title: 'A store sent you a quote',
+            title: 'Betoch sent you an offer',
             body: "![x](https://evil.example/p.png) **Free** `code` _now_\n\n# Urgent: pay here",
-            url: '/messages/1',
+            url: '/support/1',
             channels: ['mail'],
             mailLines: ['1. Pay to account 1000', '- listed', 'Normal line, with 2.5 m and a | pipe'],
         ))->toMail($this->buyer);
@@ -418,17 +432,21 @@ class AlertTest extends TestCase
         foreach (['Eve [Claim your refund](https://evil.example/login)', '![x](https://evil.example/p.png) **Free** `code` _now_ # Urgent: pay here', '1. Pay to account 1000', '- listed', 'with 2.5 m and a | pipe'] as $text) {
             $this->assertStringContainsString(e($text), str_replace("\n", ' ', $html), $text);
         }
-        $this->assertStringContainsString('href="'.Alert::link('/messages/1').'"', $html);
+        $this->assertStringContainsString('href="'.Alert::link('/support/1').'"', $html);
         $this->assertSame('Plain words stay plain.', Alert::plain("  Plain words\n stay   plain. "));
     }
 
-    public function test_the_store_text_for_a_new_inquiry_leaves_out_what_the_customer_typed_as_a_name(): void
+    public function test_the_store_text_for_a_new_request_leaves_out_what_anyone_typed(): void
     {
         $this->buyer->forceFill(['name' => 'Call 0911223344 or visit evil.example'])->save();
-        $this->as($this->buyer)->postJson('/api/conversations', ['product_slug' => $this->sofa->slug, 'type' => 'question', 'body' => 'Hi'])->assertCreated();
+        $ticket = $this->askSupport($this->buyer, ['product_slug' => $this->sofa->slug, 'body' => 'Hi'])->json('data.id');
+        $this->actAs($this->admin())->postJson('/api/admin/support/requests', [
+            'support_ticket_id' => $ticket, 'seller_profile_id' => $this->seller->id, 'topic' => 'stock',
+            'subject' => 'Call 0911223344 about '.$this->sofa->name, 'body' => 'Still in stock?',
+        ])->assertCreated();
 
-        $body = SmsMessage::where('kind', 'message.inquiry')->sole()->body;
-        $this->assertStringStartsWith('New inquiry from a customer about '.$this->sofa->name, $body);
+        $body = SmsMessage::where('kind', 'store_request.new')->sole()->body;
+        $this->assertStringStartsWith('Betoch has a question for your store.', $body);
         $this->assertStringNotContainsString('evil', $body);
         $this->assertStringNotContainsString('0911', $body);
     }

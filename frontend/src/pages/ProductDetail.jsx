@@ -1,9 +1,9 @@
-import { BadgeCheck, Banknote, Clock, MapPin, MessageCircle, Phone, Ruler, Store, Truck } from 'lucide-react'
+import { BadgeCheck, Banknote, Clock, LifeBuoy, MapPin, MessageCircle, Ruler, Store, Truck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import AddToCart from '../components/AddToCart'
 import CompareButton from '../components/CompareButton'
-import ContactSeller from '../components/ContactSeller'
+import AskSupport from '../components/AskSupport'
 import DeliveryEstimate from '../components/DeliveryEstimate'
 import FavoriteButton from '../components/FavoriteButton'
 import FitCheck from '../components/FitCheck'
@@ -71,7 +71,6 @@ export default function ProductDetail() {
   const images = p.images || []
   const madeToOrder = p.stock_type === 'made_to_order'
   const store = seller.data?.data
-  const phone = store?.phone?.replace(/\s/g, '')
   const canBuy = (!user || user.role === 'customer') && p.is_available
   const dims = formatDimensions(p.dimensions)
 
@@ -108,7 +107,7 @@ export default function ProductDetail() {
             {madeToOrder && <Clock className="size-4" aria-hidden="true" />}
             {madeToOrder
               ? `Made to order. Estimated production time ${p.production_days} days.`
-              : p.is_available ? `In stock (${p.stock_quantity} available)` : 'Out of stock. Ask the seller about restocking.'}
+              : p.is_available ? `In stock (${p.stock_quantity} available)` : 'Out of stock. Ask Betoch about restocking.'}
           </p>
 
           <div id="buy" className="mt-6 space-y-3 scroll-mt-24">
@@ -116,15 +115,17 @@ export default function ProductDetail() {
             <div className="flex flex-wrap gap-2">
               {!contactOpen && (
                 <button type="button" className="btn-secondary" onClick={() => setContactOpen(true)}>
-                  <MessageCircle className="size-4" aria-hidden="true" />Message seller
+                  <MessageCircle className="size-4" aria-hidden="true" />Ask about this product
                 </button>
               )}
-              {phone && <a href={`tel:${phone}`} className="btn-secondary"><Phone className="size-4" aria-hidden="true" />Call {store.phone}</a>}
+              {(!user || user.role === 'customer') && (
+                <Link to="/support" className="btn-ghost"><LifeBuoy className="size-4" aria-hidden="true" />Contact Betoch Support</Link>
+              )}
               <FavoriteButton productId={p.id} initial={p.is_favorite} />
               <CompareButton slug={p.slug} />
               <ShareMenu title={p.name} text={formatETB(p.price_santim)} />
             </div>
-            {contactOpen && <ContactSeller product={p} onCancel={() => setContactOpen(false)} />}
+            {contactOpen && <AskSupport product={p} title="Ask about this product" onCancel={() => setContactOpen(false)} />}
           </div>
 
           <div className="card mt-6 divide-y divide-stone-100">

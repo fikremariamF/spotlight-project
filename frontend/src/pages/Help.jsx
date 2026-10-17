@@ -16,7 +16,7 @@ const PAGES = {
   returns: {
     title: 'Returns and refunds',
     body: [
-      'Inspect furniture on delivery and report damage or a mismatch with the listing to the seller and to us within 48 hours.',
+      'Inspect furniture on delivery and report damage or a mismatch with the listing to Betoch Support within 48 hours. Use "Get help with this order" on the order page.',
       'Custom-made furniture built to your specifications is generally not returnable unless it does not match the agreed specification.',
       'Refund handling will be described in full when online payment launches.',
     ],
@@ -27,6 +27,7 @@ const PAGES = {
       'Only furniture may be listed. Every seller is reviewed before their store goes live, and listings are moderated.',
       'Listings must show the real item, accurate dimensions and materials, and a price in Ethiopian birr.',
       'Sellers may only manage their own listings, orders and records. We may suspend sellers who mislead customers.',
+      'Customers and stores do not message each other. Questions go to Betoch Support, which checks with the store and answers. Stores see a customer\'s name, phone and address only while they prepare and deliver an order.',
     ],
   },
   selling: {

@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Review;
+use App\Models\SellerRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -35,6 +36,11 @@ class SummaryController extends Controller
                     ->where('created_at', '>=', now()->subDays(30))->count(),
             ],
             'balance' => BalanceController::summary($seller->id),
+            // Requests from Betoch the store has not read yet, and those waiting for its answer.
+            'requests' => [
+                'unread' => SellerRequest::where('seller_profile_id', $seller->id)->unreadForSeller()->count(),
+                'waiting' => SellerRequest::where('seller_profile_id', $seller->id)->where('status', SellerRequest::STATUS_OPEN)->count(),
+            ],
         ]]);
     }
 }

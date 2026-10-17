@@ -3,10 +3,10 @@
 namespace App\Services;
 
 use App\Enums\OrderStatus;
+use App\Enums\QuoteStatus;
 use App\Enums\Role;
 use App\Enums\UserStatus;
 use App\Models\Checkout;
-use App\Models\Conversation;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\Quote;
@@ -14,6 +14,9 @@ use App\Models\Refund;
 use App\Models\Review;
 use App\Models\SellerLedgerEntry;
 use App\Models\SellerProfile;
+use App\Models\SellerRequest;
+use App\Models\SellerRequestMessage;
+use App\Models\SupportTicket;
 use App\Models\User;
 use App\Notifications\Alert;
 use Illuminate\Support\Facades\Cache;
@@ -25,8 +28,8 @@ use Illuminate\Support\Str;
  * Decides who hears about what, and on which channels. Callers only report what happened.
  *
  * Everything is sent after the surrounding database transaction commits, so a rolled-back
- * action never produces an alert. Messages have their own unread badge, so they alert by
- * email (rate-limited) rather than in-app.
+ * action never produces an alert. Support replies have their own unread badge, so customers hear
+ * about them by email (rate-limited) rather than in-app.
  */
 class Alerts
 {
@@ -204,83 +207,193 @@ class Alerts
     }
 
     /**
-     * A message in a conversation. $isNew is true for the customer's first message (a new inquiry).
+     * A customer opened an inquiry: every admin sees it in the bell; the support inbox shows the count.
      */
-    public function messagePosted(Conversation $conversation, string $senderSide, bool $isNew = false): void
+    public function supportOpened(SupportTicket $ticket): void
     {
-        $this->afterCommit(function () use ($conversation, $senderSide, $isNew) {
-            $conversation = Conversation::with(['customer', 'seller.user', 'product:id,name'])->find($conversation->id);
-            if (! $conversation) {
+        $this->afterCommit(function () use ($ticket) {
+            $ticket = SupportTicket::with('product:id,name')->find($ticket->id);
+            if (! $ticket) {
                 return;
             }
-            $recipient = $senderSide === 'customer' ? $conversation->seller?->user : $conversation->customer;
-            if (! $recipient) {
-                return;
-            }
-            $about = $conversation->product?->name;
-            $from = $senderSide === 'customer' ? $conversation->customer?->name : $conversation->seller?->store_name;
-            $url = "/messages/{$conversation->id}";
-
-            $channels = [];
-            $minutes = (int) config('marketplace.alerts.message_email_cooldown_minutes');
-            if (Cache::add("alerts:msg-mail:{$conversation->id}:{$recipient->id}", true, now()->addMinutes($minutes))) {
-                $channels[] = 'mail';
-            }
-            // A new inquiry is a sales lead, so the store also gets one SMS per customer per day.
-            $hours = (int) config('marketplace.alerts.inquiry_sms_cooldown_hours');
-            if ($isNew && Cache::add("alerts:inquiry-sms:{$conversation->customer_id}:{$conversation->seller_profile_id}", true, now()->addHours($hours))) {
-                $channels[] = 'sms';
-            }
-            if (! $channels) {
-                return;
-            }
-
-            $this->notify($recipient, new Alert(
-                kind: $isNew ? 'message.inquiry' : 'message.new',
-                title: $isNew ? "New inquiry from {$from}" : "New message from {$from}",
-                body: $about ? "About: {$about}. Reply in Messages." : 'Reply in Messages.',
-                url: $url,
-                channels: $channels,
-                // No customer name: it is typed by anyone and the text goes out under the marketplace's sender name.
-                sms: 'New inquiry from a customer'.($about ? " about {$about}" : '').'. Reply: '.Alert::link($url),
+            $this->notifyAdmins(new Alert(
+                kind: 'support.new',
+                title: 'New inquiry: '.$ticket->topic->label(),
+                body: $ticket->subject,
+                url: "/admin/support/{$ticket->id}",
+                channels: ['database'],
             ));
         });
     }
 
-    public function quoteSent(Quote $quote): void
+    /**
+     * The customer wrote again. Only the admin handling it hears about it (unassigned ones show in the inbox).
+     */
+    public function supportCustomerReplied(SupportTicket $ticket): void
     {
-        $this->afterCommit(function () use ($quote) {
-            $quote = Quote::with(['conversation.customer', 'conversation.seller'])->find($quote->id);
-            if (! $quote?->conversation) {
+        $this->afterCommit(function () use ($ticket) {
+            $ticket = SupportTicket::with('assignee')->find($ticket->id);
+            if (! $ticket?->assignee) {
                 return;
             }
-            $store = $quote->conversation->seller?->store_name ?? 'A store';
-            $this->notify($quote->conversation->customer, new Alert(
+            $this->notify($ticket->assignee, new Alert(
+                kind: 'support.customer_replied',
+                title: "Customer replied on inquiry {$ticket->reference()}",
+                body: $ticket->subject,
+                url: "/admin/support/{$ticket->id}",
+                channels: $this->cooldown("support:{$ticket->id}", $ticket->assignee) ? ['database', 'mail'] : ['database'],
+            ));
+        });
+    }
+
+    /**
+     * Betoch answered the customer. The Support badge shows it in the app, so this is email only,
+     * at most one per inquiry in the cooldown.
+     */
+    public function supportReplied(SupportTicket $ticket): void
+    {
+        $this->afterCommit(function () use ($ticket) {
+            $ticket = SupportTicket::with('customer')->find($ticket->id);
+            if (! $ticket?->customer || ! $this->cooldown("support:{$ticket->id}", $ticket->customer)) {
+                return;
+            }
+            $this->notify($ticket->customer, new Alert(
+                kind: 'support.reply',
+                title: 'Betoch Support answered your inquiry',
+                body: $ticket->subject.'. Read the answer in Support.',
+                url: "/support/{$ticket->id}",
+                channels: ['mail'],
+            ));
+        });
+    }
+
+    public function supportAssigned(SupportTicket $ticket, User $admin): void
+    {
+        $this->afterCommit(fn () => $this->notify($admin, new Alert(
+            kind: 'support.assigned',
+            title: "Inquiry {$ticket->reference()} is now yours",
+            body: $ticket->subject,
+            url: "/admin/support/{$ticket->id}",
+            channels: ['database'],
+        )));
+    }
+
+    /**
+     * Betoch asked the store something, or followed up. No customer details: the admin wrote the text.
+     */
+    public function storeAsked(SellerRequest $request, SellerRequestMessage $message): void
+    {
+        $this->afterCommit(function () use ($request, $message) {
+            $request = SellerRequest::with('seller.user')->find($request->id);
+            $user = $request?->seller?->user;
+            if (! $user) {
+                return;
+            }
+            $first = (int) $request->messages()->where('author_role', 'admin')->min('id') === $message->id;
+            $channels = $this->cooldown("store-request:{$request->id}", $user) ? ['database', 'mail'] : ['database'];
+            // A customer may be waiting on the answer, so a new request also texts the store, at most
+            // once a day. Follow-ups never text. The text leaves out the subject the admin typed.
+            $hours = (int) config('marketplace.alerts.store_request_sms_cooldown_hours');
+            if ($first && Cache::add("alerts:store-request-sms:{$request->seller_profile_id}", true, now()->addHours($hours))) {
+                $channels[] = 'sms';
+            }
+            $this->notify($user, new Alert(
+                kind: 'store_request.new',
+                title: $first ? 'Betoch has a question for your store' : 'New message from Betoch',
+                body: $request->subject.'. Answer it in Admin requests.',
+                url: "/seller/requests/{$request->id}",
+                channels: $channels,
+                sms: 'Betoch has a question for your store. Answer it: '.Alert::link("/seller/requests/{$request->id}"),
+            ));
+        });
+    }
+
+    /**
+     * The store answered: the admin who asked, and whoever handles the inquiry, hear about it.
+     */
+    public function storeAnswered(SellerRequest $request): void
+    {
+        $this->afterCommit(function () use ($request) {
+            $request = SellerRequest::with(['seller', 'creator', 'ticket.assignee'])->find($request->id);
+            if (! $request) {
+                return;
+            }
+            $url = $request->support_ticket_id ? "/admin/support/{$request->support_ticket_id}" : "/admin/support/requests/{$request->id}";
+            $admins = collect([$request->creator, $request->ticket?->assignee])->filter()->unique('id');
+            foreach ($admins as $admin) {
+                $this->notify($admin, new Alert(
+                    kind: 'store_request.answered',
+                    title: ($request->seller?->store_name ?? 'A store').' answered your request',
+                    body: $request->subject,
+                    url: $url,
+                    channels: $this->cooldown("store-answer:{$request->id}", $admin) ? ['database', 'mail'] : ['database'],
+                ));
+            }
+        });
+    }
+
+    public function offerSent(Quote $quote): void
+    {
+        $this->afterCommit(function () use ($quote) {
+            $quote = Quote::with('supportTicket.customer')->find($quote->id);
+            if (! $quote?->supportTicket) {
+                return;
+            }
+            $this->notify($quote->supportTicket->customer, new Alert(
                 kind: 'quote.new',
-                title: "{$store} sent you a quote",
-                body: "{$quote->title}: ".self::etb($quote->totalSantim()).'. Accept it in Messages to order at this price.',
-                url: "/messages/{$quote->conversation_id}",
+                title: 'Betoch sent you an offer',
+                body: "{$quote->title}: ".self::etb($quote->totalSantim()).'. Accept it in Support to order at this price.',
+                url: "/support/{$quote->support_ticket_id}",
                 channels: ['database', 'mail'],
             ));
         });
     }
 
     /**
+     * An offer Betoch sent was accepted, declined or withdrawn. The store is told without the customer's name.
+     */
+    public function offerAnswered(Quote $quote, QuoteStatus $to): void
+    {
+        $this->afterCommit(function () use ($quote, $to) {
+            $quote = Quote::with(['seller.user', 'supportTicket.assignee'])->find($quote->id);
+            if (! $quote?->supportTicket || $to === QuoteStatus::Withdrawn) {
+                return;
+            }
+            $verb = $to === QuoteStatus::Accepted ? 'accepted' : 'declined';
+            $this->notify($quote->seller?->user, new Alert(
+                kind: 'quote.answered',
+                title: "The customer {$verb} your offer",
+                body: $quote->title.($to === QuoteStatus::Accepted ? '. You will see it under Orders when they check out.' : ''),
+                url: $quote->seller_request_id ? "/seller/requests/{$quote->seller_request_id}" : '/seller/orders',
+                channels: ['database', 'mail'],
+            ));
+            $this->notify($quote->supportTicket->assignee, new Alert(
+                kind: 'support.offer_answered',
+                title: "Customer {$verb} the offer on inquiry {$quote->supportTicket->reference()}",
+                body: $quote->title,
+                url: "/admin/support/{$quote->support_ticket_id}",
+                channels: ['database'],
+            ));
+        });
+    }
+
+    /**
+     * A quote from before support messaging (sent in a store chat) was accepted or declined.
+     *
      * @param  'accepted'|'declined'  $verb
      */
     public function quoteAnswered(Quote $quote, string $verb): void
     {
         $this->afterCommit(function () use ($quote, $verb) {
-            $quote = Quote::with(['conversation.customer', 'conversation.seller.user'])->find($quote->id);
-            if (! $quote?->conversation) {
+            $quote = Quote::with('seller.user')->find($quote->id);
+            if (! $quote) {
                 return;
             }
-            $customer = $quote->conversation->customer?->name ?? 'The customer';
-            $this->notify($quote->conversation->seller?->user, new Alert(
+            $this->notify($quote->seller?->user, new Alert(
                 kind: 'quote.answered',
-                title: "{$customer} {$verb} your quote",
-                body: $quote->title,
-                url: "/messages/{$quote->conversation_id}",
+                title: "A customer {$verb} your quote",
+                body: $quote->title.($verb === 'accepted' ? '. You will see it under Orders when they check out.' : ''),
+                url: '/seller/orders',
                 channels: ['database', 'mail'],
             ));
         });
@@ -393,6 +506,16 @@ class Alerts
                 channels: ['database', 'mail'],
             ));
         });
+    }
+
+    /**
+     * True at most once per key and person in the message cooldown, so a busy thread sends one email, not twenty.
+     */
+    private function cooldown(string $key, User $user): bool
+    {
+        $minutes = (int) config('marketplace.alerts.message_email_cooldown_minutes');
+
+        return Cache::add("alerts:mail:{$key}:{$user->id}", true, now()->addMinutes($minutes));
     }
 
     /**

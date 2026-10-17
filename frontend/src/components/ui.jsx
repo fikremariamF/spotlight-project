@@ -1,6 +1,6 @@
 import { CheckCircle2, ChevronRight, CircleAlert } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { STATUS_LABELS } from '../lib/format'
+import { STATUS_LABELS, SUPPORT_STATUS_LABELS, SUPPORT_STATUS_TONES } from '../lib/format'
 
 export function Spinner({ label = 'Loading' }) {
   return (
@@ -63,6 +63,14 @@ export function StatusBadge({ status }) {
   return (
     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${BADGE_TONES[status] || 'bg-stone-100 text-stone-700'}`}>
       {STATUS_LABELS[status] || status}
+    </span>
+  )
+}
+
+export function SupportStatusBadge({ status }) {
+  return (
+    <span className={`inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${SUPPORT_STATUS_TONES[status] || 'bg-stone-100 text-stone-700'}`}>
+      {SUPPORT_STATUS_LABELS[status] || status}
     </span>
   )
 }

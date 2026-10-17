@@ -106,9 +106,11 @@ class DeliveryDistanceTest extends TestCase
         $this->assertFalse($order->delivery_distance_estimated);
         $this->assertEquals(self::HOME[0], (float) $order->checkout->latitude);
 
-        // The store sees the distance and the pin for directions.
+        // The store sees the distance to price the trip, and the pin for directions once it accepts the order.
         $this->as($this->seller->user)->getJson("/api/seller/orders/{$order->id}")->assertOk()
             ->assertJsonPath('data.delivery_distance_km', 12.3)
+            ->assertJsonPath('data.delivery_address.latitude', null);
+        $this->postJson("/api/seller/orders/{$order->id}/confirm")->assertOk()
             ->assertJsonPath('data.delivery_address.latitude', self::HOME[0]);
     }
 

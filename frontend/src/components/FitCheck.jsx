@@ -125,7 +125,7 @@ export default function FitCheck({ dimensions }) {
           </ul>
         )}
         {result.note && <p className="mt-1 text-xs text-stone-600">{result.note}</p>}
-        {result.status === 'no' && <p className="mt-1 text-xs text-stone-600">Ask the seller whether it comes apart or can be built on site.</p>}
+        {result.status === 'no' && <p className="mt-1 text-xs text-stone-600">Ask Betoch Support whether it comes apart or can be built on site.</p>}
         {!editing && (
           <button type="button" className="mt-1 text-xs font-semibold text-brand-700 hover:underline" onClick={() => setEditing(true)}>
             {hasSizes(space) ? `Change sizes${space === address ? ` (${address.label || 'default address'})` : ''}` : 'Add your door and stair sizes'}

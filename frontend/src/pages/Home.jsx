@@ -12,7 +12,7 @@ import { useRecentlyViewed } from '../lib/useRecent'
 const PROMISES = [
   [BadgeCheck, 'Verified sellers', 'Every store is checked by our team before it can list.'],
   [Ruler, 'Clear specifications', 'Dimensions, materials and delivery terms on every listing.'],
-  [MessageCircle, 'Talk to the maker', 'Ask about finishes, custom sizes or a better price.'],
+  [MessageCircle, 'One team to ask', 'Ask Betoch about finishes, custom sizes or a better price. We check with the maker for you.'],
 ]
 
 function HeroSearch() {

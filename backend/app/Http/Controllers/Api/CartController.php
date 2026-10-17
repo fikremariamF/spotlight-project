@@ -92,13 +92,13 @@ class CartController extends Controller
     public function addQuote(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-        $quote = Quote::whereHas('conversation', fn ($q) => $q->where('customer_id', $user->id))->findOrFail($id);
+        $quote = Quote::forCustomer($user->id)->findOrFail($id);
 
         if ($quote->status !== QuoteStatus::Accepted) {
             throw ValidationException::withMessages(['quote' => 'Accept the quote before ordering it.']);
         }
         if ($quote->orderDeadline()->isPast()) {
-            throw ValidationException::withMessages(['quote' => 'This quote has expired. Ask the seller for a new one.']);
+            throw ValidationException::withMessages(['quote' => 'This offer has expired. Ask Betoch Support for a new one.']);
         }
         if ($quote->isOrdered()) {
             throw ValidationException::withMessages(['quote' => 'This quote has already been ordered.']);

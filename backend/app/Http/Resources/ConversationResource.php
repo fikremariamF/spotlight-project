@@ -23,7 +23,8 @@ class ConversationResource extends JsonResource
     public function __construct($resource, mixed $side = null)
     {
         parent::__construct($resource);
-        $this->side = in_array($side, ['customer', 'seller'], true) ? $side : null;
+        // 'admin' reads old conversations in the support inbox; nothing is unread for an admin.
+        $this->side = in_array($side, ['customer', 'seller', 'admin'], true) ? $side : null;
     }
 
     public static function forSide(string $side, $resource): static
@@ -41,7 +42,7 @@ class ConversationResource extends JsonResource
             'subject' => $this->subject,
             'status' => $this->status,
             'viewer_side' => $side,
-            'unread' => $side !== null && $this->isUnreadFor($side),
+            'unread' => in_array($side, ['customer', 'seller'], true) && $this->isUnreadFor($side),
             'last_message_at' => $this->last_message_at?->toIso8601String(),
             // Customers see the store; sellers see the customer's name only (no email).
             'seller' => $this->whenLoaded('seller', fn () => [

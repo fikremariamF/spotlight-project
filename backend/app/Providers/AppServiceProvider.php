@@ -67,6 +67,12 @@ class AppServiceProvider extends ServiceProvider
             Limit::perDay(500)->by('d|'.$request->user()?->id),
         ]);
 
+        // Support staff answer many inquiries a day; the cap only stops a runaway script or stolen session.
+        RateLimiter::for('staff-messages', fn (Request $request) => [
+            Limit::perMinute(60)->by('sm|'.$request->user()?->id),
+            Limit::perDay(3000)->by('sd|'.$request->user()?->id),
+        ]);
+
         RateLimiter::for('checkout', fn (Request $request) => Limit::perMinute(10)->by('c|'.$request->user()?->id));
 
         // Provider callbacks only trigger a verify call, but an open endpoint still needs a ceiling.

@@ -1,5 +1,5 @@
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle, Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react'
-import { Bell, ChevronDown, GitCompareArrows, Heart, LayoutDashboard, LogOut, Menu as MenuIcon, MessageCircle, Search, ShoppingBag, Store, User, X } from 'lucide-react'
+import { Bell, ChevronDown, GitCompareArrows, Heart, Inbox, LayoutDashboard, LifeBuoy, LogOut, Menu as MenuIcon, Search, ShoppingBag, Store, User, X } from 'lucide-react'
 import { Suspense, useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Toaster } from 'sonner'
@@ -79,6 +79,18 @@ function AlertsLink({ onNavigate }) {
   return <IconLink to="/notifications" label="Alerts" icon={Bell} count={unread} tone="bg-red-600" onClick={onNavigate} />
 }
 
+// Customers talk to Betoch Support; stores answer Betoch's requests. Nobody messages the other side.
+const INBOX = {
+  customer: { to: '/support', label: 'Support', icon: LifeBuoy, noun: 'new answers' },
+  seller: { to: '/seller/requests', label: 'Admin requests', icon: Inbox, noun: 'unread' },
+}
+
+function InboxLink({ role }) {
+  const { unread } = useInbox()
+  const box = INBOX[role]
+  return box ? <IconLink to={box.to} label={box.label} icon={box.icon} count={unread} noun={box.noun} /> : null
+}
+
 function CartLink() {
   const { count } = useCart()
   return <IconLink to="/cart" label="Cart" icon={ShoppingBag} count={count} noun={count === 1 ? 'item' : 'items'} />
@@ -135,7 +147,6 @@ function AccountMenu({ user, onSignOut }) {
 
 function DesktopActions({ onSignOut, workArea }) {
   const { user } = useAuth()
-  const { unread } = useInbox()
   const linkClass = ({ isActive }) => `rounded-full px-3.5 py-2 text-sm font-medium ${isActive ? 'bg-brand-50 text-brand-800' : 'text-stone-700 hover:bg-stone-100'}`
 
   if (!user) {
@@ -157,7 +168,7 @@ function DesktopActions({ onSignOut, workArea }) {
         </NavLink>
       )}
       {user.role === 'admin' && !workArea && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
-      {user.role !== 'admin' && <IconLink to="/messages" label="Messages" icon={MessageCircle} count={unread} />}
+      <InboxLink role={user.role} />
       {user.role !== 'admin' && !workArea && <IconLink to="/wishlist" label="Wishlist" icon={Heart} />}
       {user.role === 'customer' && <CartLink />}
       <AlertsLink />
@@ -193,9 +204,9 @@ function MobileDrawer({ open, onClose, onSignOut }) {
               <NavLink to="/sell" className={item} onClick={onClose}>Sell on our marketplace</NavLink>
             </>
           )}
-          {user && user.role !== 'admin' && (
-            <NavLink to="/messages" className={item} onClick={onClose}>
-              Messages {unread > 0 && <span className="rounded-full bg-brand-700 px-2 text-xs font-semibold text-white">{unread}<span className="sr-only"> unread</span></span>}
+          {INBOX[user?.role] && (
+            <NavLink to={INBOX[user.role].to} className={item} onClick={onClose}>
+              {INBOX[user.role].label} {unread > 0 && <span className="rounded-full bg-brand-700 px-2 text-xs font-semibold text-white">{unread}<span className="sr-only"> {INBOX[user.role].noun}</span></span>}
             </NavLink>
           )}
           {user && user.role !== 'admin' && <NavLink to="/wishlist" className={item} onClick={onClose}>Wishlist</NavLink>}
@@ -328,9 +339,8 @@ export default function Layout() {
   // The admin and seller areas are work tools: no shop search, category bar or shop footer.
   // Exact prefixes, so the public store pages under /sellers/ keep the shop look.
   const inArea = (base) => location.pathname === base || location.pathname.startsWith(`${base}/`)
-  // Sellers read their messages inside the seller area too.
   const workArea = inArea('/admin') && user?.role === 'admin' ? 'Admin'
-    : (inArea('/seller') || inArea('/messages')) && user?.role === 'seller' ? 'Seller' : null
+    : inArea('/seller') && user?.role === 'seller' ? 'Seller' : null
 
   async function handleSignOut() {
     await signOut()

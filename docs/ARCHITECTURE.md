@@ -17,9 +17,9 @@ React SPA (frontend/)  --HTTPS, Bearer token-->  Laravel API (backend/, /api/*) 
 | Role | How it is assigned | Can |
 |---|---|---|
 | guest | not signed in | browse published listings, storefronts, categories |
-| customer | `POST /api/auth/register` | wishlist, delivery addresses, inquiries to sellers, accept or decline quotes (orders and reviews in later milestones) |
-| seller | `POST /api/auth/register-seller` creates the account and a **pending** store | drafts while pending; submit listings once approved; answer inquiries and send quotes; only ever sees own records |
-| admin | `php artisan marketplace:create-admin` only | approve/reject/suspend sellers, moderate listings, manage categories and delivery zones, audit log. Admins cannot read private conversations |
+| customer | `POST /api/auth/register` | wishlist, delivery addresses, questions to Betoch Support (never to stores directly), accept or decline offers, orders, reviews |
+| seller | `POST /api/auth/register-seller` creates the account and a **pending** store | drafts while pending; submit listings once approved; answer requests from Betoch (with an optional price proposal); orders and balance; only ever sees own records |
+| admin | `php artisan marketplace:create-admin` only | approve/reject/suspend sellers, moderate listings, manage categories and delivery zones, audit log; answer customer inquiries in Support, ask stores internally and send their offers to customers. Admins can read the old customer-store chats (read-only, each read audited) |
 | delivery | reserved for a later milestone | |
 
 `role` and `status` are not mass-assignable, so no API payload can change them.
@@ -125,6 +125,29 @@ erDiagram
 | refunds | order_id (unique, nullable), payment_id, customer_id, amount_santim, reason, status (due/refunded), method, reference, note, refunded_by, refunded_at |
 | seller_ledger_entries | + types `sale` (negative: an online sale the marketplace holds for the store) and `payout` (positive: money sent to the store) |
 
+### Added for Betoch Support
+
+Customers talk only to Betoch Support. When the answer needs a store, an admin asks that store in a separate internal thread. The old `conversations` and `messages` tables are kept unchanged as read-only history.
+
+```mermaid
+erDiagram
+    users ||--o{ support_tickets : "asks (customer)"
+    support_tickets ||--o{ support_messages : contains
+    support_tickets |o--o{ seller_requests : "asks a store about"
+    seller_profiles ||--o{ seller_requests : receives
+    seller_requests ||--o{ seller_request_messages : contains
+    support_tickets |o--o{ quotes : "offers sent"
+    seller_requests |o--o{ quotes : "from the proposal in"
+```
+
+| Table | Key columns and constraints |
+|---|---|
+| support_tickets | customer_id (restrict), topic (product/availability/price/custom/delivery/order/return/refund/other), subject, status (new/open/waiting/resolved/closed), assigned_to (admin, set null), product_id, order_id, seller_profile_id (all nullable, set null), escalated_at, escalation_reason, last_public_message_id/at/by, customer_last_read_id, last_activity_at, first_response_at, resolved_at, closed_at |
+| support_messages | support_ticket_id (restrict), author_id, author_role (customer/admin/system), kind (message/note/event/offer), **internal** (notes and history; never sent to the customer), body, quote_id, meta. Append-only |
+| seller_requests | support_ticket_id nullable (restrict), seller_profile_id (restrict), product_id, order_id, topic (stock/specs/price/delivery/fulfilment/other), subject, status (open = waiting for the store, answered = waiting for Betoch, closed), created_by, last_message_id/at/by, seller_last_read_id, closed_at |
+| seller_request_messages | seller_request_id (restrict), author_id, author_role (admin/seller/system), body, proposal columns (price_santim, quantity, delivery_fee_santim, production_days, valid_until), quote_id once Betoch sent it as an offer |
+| quotes | + support_ticket_id, seller_request_id (both restrict); conversation_id is now nullable. Rolling the migration back is refused while any quote has no conversation, so offers sent through support are never deleted |
+
 Foreign keys use `restrict` where deleting the parent would destroy history (sellers, categories, cities) and `cascade` only for pure child rows (images, favorites).
 
 ## Business rules implemented
@@ -140,23 +163,26 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 - `archived` hides a listing; resubmitting sends it to review. Delete is a soft delete so future order history keeps its product rows.
 - Made-to-order items carry production days and no stock count; in-stock items carry a count and no production days. Every listing offers delivery, pickup, or both.
 
-**Inquiries (Method B).**
-- Only customer accounts start inquiries, about a visible listing or a visible store. Seller and admin accounts cannot.
-- Allowed types follow the seller's settings: price offers only on listings marked negotiable, custom requests only where the listing or store accepts custom orders, availability and price offers only about a listing.
-- A second inquiry about the same listing while a thread is open is added to that thread instead of opening a duplicate (serialised with a row lock).
-- Either side can close a thread. Closed threads stay readable but take no new messages or quotes.
-- When a store is suspended, both sides keep read access to history but nobody can write.
-- Unread state is tracked by message id per side, not by timestamp, so two messages in the same second are never missed. Sending a message marks the thread read for the sender.
-- Outsiders get 404 on every conversation and quote endpoint.
-- Rate limits: 10 new inquiries per hour and 30 per day per customer; 20 messages per minute and 500 per day per user.
+**Betoch Support (customer inquiries).**
+- Customers never message stores. "Ask about this product", "Ask about this store", "Get help with this order" and the Support page all open a support inquiry, with the listing, store or order attached by the server from its id or slug.
+- Only customer accounts open inquiries, and only about a visible listing, a visible store or their own order. A second question with the same topic about the same listing or order, while the first is active, is added to it (serialised with a row lock on the customer).
+- Statuses: New -> Open (first admin reply or offer) -> Waiting for information / Resolved -> Closed. A customer reply moves Waiting or Resolved back to Open. Customers can close their own inquiry; admins can set any status, and a closed inquiry takes no messages until an admin reopens it. Closing ends any pending offer (declined when the customer closes, withdrawn when an admin does).
+- Customers see only their own inquiries (404 otherwise) and only rows with `internal = false`. The resource filters internal rows a second time. Admin replies are signed "Betoch Support"; admin names, private notes, assignments, escalations, which stores were asked and everything a store wrote stay internal. An offer names the store that makes and delivers it.
+- Admins can assign (replying, asking a store or sending an offer takes an unassigned inquiry), escalate a complaint with a reason, add private notes, and filter by needs reply, mine, unassigned, escalated, status and topic. Every message, note, status change, assignment and escalation is a timestamped row in the inquiry's history and in the audit log.
+- Rate limits: 10 new inquiries per hour and 30 per day per customer; 20 customer or store messages per minute and 500 per day; admin replies, notes and store requests 60 per minute and 3000 per day.
 
-**Quotes.**
-- Only the conversation's seller sends quotes. A new quote withdraws the seller's earlier pending quote in that thread, so the customer can only accept the latest terms.
+**Requests to stores (internal).**
+- Only admins start a request, to an approved or suspended store (a suspended store may still have orders to finish; it can answer, but its prices cannot be sent as offers), optionally linked to an inquiry and to that store's own listing or order (another store's listing or order is refused, as is an order still waiting for online payment).
+- Stores see their requests in Admin requests (`/seller/requests`) and answer Betoch, never the customer. A request shows no customer name, email or phone; the admin writes the question.
+- A store's answer can carry a price proposal (price, quantity, production days, valid until, free delivery or marketplace-priced delivery; a store delivery fee only while Admin > Delivery allows stores to set fees).
+- An admin can send a proposal to the customer as an offer. The offer is a normal quote row, so it goes through the cart and checkout unchanged. It cannot stay open longer than the store agreed, cannot be sent after the store's date, for a suspended store, or on a closed inquiry, and a new offer from the same store withdraws its earlier pending one. Locking order: inquiry, then request, then quote.
+- Old customer-store chats stay readable: customers and admins read them, nobody can write in them, and stores no longer see them. Quotes already sent in them can still be accepted (while the chat is open and the store active), declined, withdrawn and ordered.
+
+**Quotes and offers.**
 - Validity is at most 60 days and inclusive of the last day. Expiry is derived from `valid_until` and never stored, so there is no cron job to forget.
-- Accept, decline and withdraw run under row locks (conversation, then quote, the same order quote creation uses) and succeed exactly once. Verified with parallel requests against MariaDB.
-- Accepting needs an open thread and an active store. Declining and withdrawing always work.
-- Closing a thread ends any pending quote: declined when the customer closes, withdrawn when the seller closes.
-- An accepted quote can be added to the cart and ordered at its agreed price and quantity until the later of its validity date and 7 days after acceptance (`marketplace.quotes.order_grace_days`). It can be ordered once; if that order is cancelled it can be ordered again.
+- Accept, decline and withdraw run under row locks and succeed exactly once. Verified with parallel requests against MariaDB.
+- Accepting needs an active store (and, for old quotes, an open chat; for offers, an inquiry that is not closed). Declining and withdrawing always work.
+- An accepted quote or offer can be added to the cart and ordered at its agreed price and quantity until the later of its validity date and 7 days after acceptance (`marketplace.quotes.order_grace_days`). It can be ordered once; if that order is cancelled it can be ordered again.
 
 **Delivery fees.**
 - Admins group sub-cities into delivery zones with a default fee and day range.
@@ -206,13 +232,13 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 - Orders in the range can be downloaded as CSV. Cells starting with = + - @ are prefixed so spreadsheets do not run them as formulas. Exports are audited.
 
 **Alerts (milestone 5).**
-- Every alert is an in-app alert (the bell in the header, `/notifications`), and some also go by email or SMS. Who gets what is in `app/Services/Alerts.php`. Texts are kept for things that need action soon: a new order and a cancelled order for the store, a confirmed, dispatched, ready-for-pickup or cancelled order for the customer, a new inquiry, and a store being approved, suspended or reinstated.
+- Every alert is an in-app alert (the bell in the header, `/notifications`), and some also go by email or SMS. Who gets what is in `app/Services/Alerts.php`. Texts are kept for things that need action soon: a new order and a cancelled order for the store, a confirmed, dispatched, ready-for-pickup or cancelled order for the customer, a new request from Betoch to a store, and a store being approved, suspended or reinstated.
 - Alerts are sent only after the database transaction commits, so a rolled-back checkout or status change alerts nobody. A failing mail server or SMS provider is logged and never turns the action itself into an error.
 - In-app alerts are written straight away; email and SMS go through the queue, retried 3 times (after 1 and 5 minutes). Provider errors that a retry cannot fix (bad number, rejected request, missing token) are not retried.
 - Users choose email and SMS on or off in Alert settings, and set their mobile number there. Suspended accounts get nothing. Admins can pause every text in Admin > Settings, and see each text and its status in Admin > Text messages.
 - Texts go only to Ethiopian mobile numbers (09 and 07), stored as +2519... or +2517... A store's texts go to the store phone. A customer without a mobile number on the account gets order texts at the phone given at checkout.
-- Messages already have their own unread badge, so they make no in-app alert. They email at most once per conversation and person every 30 minutes. A new inquiry also texts the store, at most once per customer and store a day. Both limits use atomic cache adds, verified with 6 parallel requests: exactly one email and one text.
-- Quotes alert through the quote (sent, accepted, declined), not as a message.
+- Support has its own unread badge. Betoch's answers email the customer at most once per inquiry every 30 minutes. New inquiries alert admins in the app; a customer's follow-up alerts the assigned admin. A new request emails the store and texts it at most once a day per store; the text never includes what the admin typed. Store answers alert the admin who asked and the assigned admin. These limits use atomic cache adds.
+- Offers alert the customer when sent, and the store (without the customer's name) when accepted or declined.
 
 **My account.**
 - Every account has a My account page (`/account`) to change its name, email, phone and password, and to sign out other devices. Role and status cannot be changed there.
@@ -275,9 +301,11 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 | Refunds and payouts | recorded by an admin after sending the money | Chapa's refund and transfer APIs are not verified against a live account yet; manual is safe to start with |
 | Paid online, store over its credit limit | can still confirm | The customer has paid, and delivering lowers what the store owes |
 | Delivery for several items from one seller | one trip, highest line fee | Matches how sellers deliver; avoids charging per item |
-| Contact seller | in-app inquiries, plus the public store phone while `MARKETPLACE_SHOW_SELLER_PHONE=true` | Keeps today's behavior. Turning it off keeps deals in the app, where commission can be earned |
-| Admin access to conversations | none | Privacy by default. Needed later for disputes, with an audited read |
-| New-message alerts | in-app unread badge, plus at most one email per conversation every 30 minutes | Avoids an email per chat line |
+| Contact between customers and stores | none; both talk to Betoch Support, which relays approved answers and sends store prices as offers | Keeps deals and complaints visible to the marketplace. The store phone is never shown to shoppers (`MARKETPLACE_SHOW_SELLER_PHONE` is gone) |
+| Old customer-store chats | read-only for the customer and admins; stores no longer see them | Keeps history without a migration that rewrites it |
+| Customer contact for stores | name, phone, street, landmark and map pin only while the order is confirmed, processing, ready or dispatched; area, floor and lift always | Stores need the contact to deliver, not before they accept or after it is done |
+| Admin roles | one admin role; any admin can take any inquiry | Smallest team to start; assignment shows who is on it |
+| New-message alerts | in-app unread badge, plus at most one email per inquiry every 30 minutes | Avoids an email per chat line |
 | SMS provider | AfroMessage behind a driver setting; `log` (send nothing) by default | Common Ethiopian provider with a simple HTTP API. Untested against a live account until the business opens one |
 | Which alerts are texts | only alerts that need action within hours | Texts cost money per message |
 
@@ -285,7 +313,7 @@ Foreign keys use `restrict` where deleting the parent would destroy history (sel
 
 Checkout, orders and stock reservation shipped in milestone 3 (see Business rules). Still planned:
 
-**Returns and disputes.** returned and disputed states after delivery, with an audited admin read of the conversation.
+**Returns and disputes.** returned and disputed states after delivery, handled through the support inquiry on the order.
 
 **Payments, later steps.** Sending refunds and store payouts through Chapa's APIs instead of by hand, once tested against a live account. Direct telebirr or bank integrations only if Chapa's fees or coverage make it worth it.
 
@@ -300,10 +328,11 @@ Checkout, orders and stock reservation shipped in milestone 3 (see Business rule
 | 3 | Catalog: home, categories, search, filters, sorting, pagination, product page, storefronts, wishlist | Done. Inquiries move to milestone 2 |
 | 4 | Seller: application, approval, dashboard, listings, photos, stock | Done. Orders and finance views come with stage 5 |
 | 6 (part) | Admin: seller approval, listing moderation, categories, audit log, counts | Done |
-| 2 (milestone 2) | Inquiries and custom quotes, customer addresses, delivery zones | Done |
+| 2 (milestone 2) | Inquiries and custom quotes, customer addresses, delivery zones | Done. Inquiries later replaced by Betoch Support |
 | 5 | Cart, checkout, multi-seller orders, stock reservation, cash on delivery | Done (milestone 3). Online payment added later (see the last row) |
 | 6 rest | Seller and admin order handling, commission settings | Done (milestone 3) |
 | 6 (milestone 4) | Commission balances and settlements, reviews, admin users, reports and CSV export | Done. Disputes are planned |
 | Milestone 5 | In-app, email and SMS alerts, alert settings, admin text message log | Done. Live SMS needs an AfroMessage account |
 | Online payments | Chapa checkout, payment window and expiry, refunds, store payouts, admin Payments page | Done. Live payments need a Chapa account and keys |
+| Betoch Support | Customers ask Betoch instead of stores; admin Support center with notes, assignment, escalation and history; internal requests to stores; store proposals sent as offers; store phone hidden; customer contact shown to stores only while delivering | Done |
 | 7 | CI, end-to-end tests, deployment scripts, backups automation | Planned |

@@ -5,27 +5,30 @@ import { useAuth } from './AuthContext'
 const InboxContext = createContext({ unread: 0, refreshUnread: () => {} })
 const POLL_MS = 60000
 
+// Customers: Betoch Support answers they have not read. Stores: requests from Betoch they have not read.
+const COUNT_URL = { customer: '/support/unread-count', seller: '/seller/requests/unread-count' }
+
 /**
- * Unread conversation count for the header badge. Polls while the tab is visible;
- * pages that read or send messages call refreshUnread() to update it at once.
+ * Unread count for the header badge. Polls while the tab is visible; pages that read or send
+ * messages call refreshUnread() to update it at once.
  */
 export function InboxProvider({ children }) {
   const { user } = useAuth()
   const [unread, setUnread] = useState(0)
-  const enabled = user?.role === 'customer' || user?.role === 'seller'
+  const url = COUNT_URL[user?.role]
 
   const refreshUnread = useCallback(async () => {
-    if (!enabled) return
+    if (!url) return
     try {
-      const res = await api.get('/conversations/unread-count')
+      const res = await api.get(url)
       setUnread(res.data.data.unread)
     } catch {
       // A failed poll keeps the last known count.
     }
-  }, [enabled])
+  }, [url])
 
   useEffect(() => {
-    if (!enabled) {
+    if (!url) {
       setUnread(0)
       return undefined
     }
@@ -39,7 +42,7 @@ export function InboxProvider({ children }) {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [enabled, refreshUnread])
+  }, [url, refreshUnread])
 
   const value = useMemo(() => ({ unread, refreshUnread }), [unread, refreshUnread])
   return <InboxContext.Provider value={value}>{children}</InboxContext.Provider>

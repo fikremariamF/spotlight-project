@@ -1,5 +1,5 @@
 import { lazy } from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
 import RequireRole from './components/RequireRole'
 import { useAuth } from './context/AuthContext'
@@ -36,6 +36,15 @@ const AdminSms = lazy(() => import('./pages/admin/AdminSms'))
 const Addresses = lazy(() => import('./pages/Addresses'))
 const Account = lazy(() => import('./pages/Account'))
 const Checkout = lazy(() => import('./pages/Checkout'))
+const AdminOldChat = lazy(() => import('./pages/admin/AdminSupport').then((m) => ({ default: m.AdminOldChat })))
+const AdminSellerRequest = lazy(() => import('./pages/admin/AdminSupport').then((m) => ({ default: m.AdminSellerRequest })))
+const AdminSupport = lazy(() => import('./pages/admin/AdminSupport'))
+const AdminSupportTicket = lazy(() => import('./pages/admin/AdminSupport').then((m) => ({ default: m.AdminSupportTicket })))
+const NewSupportRequest = lazy(() => import('./pages/Support').then((m) => ({ default: m.NewSupportRequest })))
+const SupportInbox = lazy(() => import('./pages/Support').then((m) => ({ default: m.SupportInbox })))
+const SupportTicketView = lazy(() => import('./pages/Support').then((m) => ({ default: m.SupportTicketView })))
+const SellerRequests = lazy(() => import('./pages/seller/SellerRequests').then((m) => ({ default: m.SellerRequests })))
+const SellerRequestView = lazy(() => import('./pages/seller/SellerRequests').then((m) => ({ default: m.SellerRequestView })))
 const ConversationView = lazy(() => import('./pages/Messages').then((m) => ({ default: m.ConversationView })))
 const Inbox = lazy(() => import('./pages/Messages').then((m) => ({ default: m.Inbox })))
 const AlertSettings = lazy(() => import('./pages/Notifications').then((m) => ({ default: m.AlertSettings })))
@@ -54,10 +63,14 @@ const SellerReviews = lazy(() => import('./pages/seller/SellerReviews'))
 const SellerProductForm = lazy(() => import('./pages/seller/SellerProductForm'))
 const SellerProfile = lazy(() => import('./pages/seller/SellerProfile'))
 
-/** Messages are shared with customers: sellers see them inside the seller area, customers in the shop. */
-function SellerShellFor({ children }) {
+/**
+ * Stores no longer have customer chats: links to the old Messages pages (bookmarks, old emails) lead
+ * a store to its Admin requests. Customers keep their old chats to read.
+ */
+function OldMessages({ children }) {
   const { user } = useAuth()
-  return user?.role === 'seller' ? <SellerLayout>{children}</SellerLayout> : children
+  if (user?.role === 'seller') return <Navigate to="/seller/requests" replace />
+  return <RequireRole roles={['customer']}>{children}</RequireRole>
 }
 
 export default function App() {
@@ -76,8 +89,11 @@ export default function App() {
         <Route path="compare" element={<Compare />} />
 
         <Route path="wishlist" element={<RequireRole><Wishlist /></RequireRole>} />
-        <Route path="messages" element={<RequireRole roles={['customer', 'seller']}><SellerShellFor><Inbox /></SellerShellFor></RequireRole>} />
-        <Route path="messages/:id" element={<RequireRole roles={['customer', 'seller']}><SellerShellFor><ConversationView /></SellerShellFor></RequireRole>} />
+        <Route path="support" element={<RequireRole roles={['customer']}><SupportInbox /></RequireRole>} />
+        <Route path="support/new" element={<RequireRole roles={['customer']}><NewSupportRequest /></RequireRole>} />
+        <Route path="support/:id" element={<RequireRole roles={['customer']}><SupportTicketView /></RequireRole>} />
+        <Route path="messages" element={<OldMessages><Inbox /></OldMessages>} />
+        <Route path="messages/:id" element={<OldMessages><ConversationView /></OldMessages>} />
         <Route path="notifications" element={<RequireRole><Notifications /></RequireRole>} />
         <Route path="account" element={<RequireRole><Account /></RequireRole>} />
         <Route path="account/alerts" element={<RequireRole><AlertSettings /></RequireRole>} />
@@ -96,6 +112,8 @@ export default function App() {
           <Route path="orders/:id" element={<SellerOrderDetail />} />
           <Route path="balance" element={<SellerBalance />} />
           <Route path="reviews" element={<SellerReviews />} />
+          <Route path="requests" element={<SellerRequests />} />
+          <Route path="requests/:id" element={<SellerRequestView />} />
           <Route path="profile" element={<SellerProfile />} />
           <Route path="products/new" element={<SellerProductForm />} />
           <Route path="products/:id/edit" element={<SellerProductForm />} />
@@ -103,6 +121,10 @@ export default function App() {
 
         <Route path="admin" element={<RequireRole roles={['admin']}><AdminLayout /></RequireRole>}>
           <Route index element={<AdminOverview />} />
+          <Route path="support" element={<AdminSupport />} />
+          <Route path="support/:id" element={<AdminSupportTicket />} />
+          <Route path="support/requests/:id" element={<AdminSellerRequest />} />
+          <Route path="support/old-chats/:id" element={<AdminOldChat />} />
           <Route path="orders" element={<AdminOrders />} />
           <Route path="orders/:id" element={<AdminOrderDetail />} />
           <Route path="settlements" element={<AdminSettlements />} />

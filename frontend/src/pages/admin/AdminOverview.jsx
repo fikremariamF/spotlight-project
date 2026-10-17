@@ -18,6 +18,9 @@ export default function AdminOverview() {
       <section aria-labelledby="todo" className="mb-6">
         <h2 id="todo" className="mb-2 text-sm font-semibold text-stone-500">To do</h2>
         <TodoList items={[
+          [s.support?.escalated, 'escalated complaint', 'escalated complaints', '/admin/support?quick=escalated', 'bad'],
+          [s.support?.needs_reply, 'customer inquiry waiting for a reply', 'customer inquiries waiting for a reply', '/admin/support?quick=needs_reply'],
+          [s.support?.store_answers, 'store answer to review', 'store answers to review', '/admin/support?tab=requests&status=answered'],
           [s.sellers.pending, 'store application', 'store applications', '/admin/sellers?status=pending'],
           [s.products.pending_review, 'listing to review', 'listings to review', '/admin/listings'],
           [s.refunds_due, 'refund to send', 'refunds to send', '/admin/payments'],

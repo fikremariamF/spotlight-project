@@ -129,7 +129,7 @@ export function Register() {
   if (user) return <Navigate to={homeFor(user)} replace />
 
   return (
-    <AuthCard title="Create your account" subtitle="Save favorites and contact sellers. Ordering arrives soon.">
+    <AuthCard title="Create your account" subtitle="Save favorites, order furniture and ask Betoch Support anything.">
       <form
         className="space-y-4"
         noValidate
@@ -206,7 +206,7 @@ export function SellerApply() {
                 {Object.entries(BUSINESS_TYPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
-            <Field label="Store phone (shown to customers)" name="store_phone" error={form.errors.store_phone}>
+            <Field label="Store phone (for Betoch and order texts, not shown to customers)" name="store_phone" error={form.errors.store_phone}>
               <input className="input" inputMode="tel" {...form.bind('store_phone', 'tel')} />
             </Field>
             <Field label="Sub-city" name="area_id" error={form.errors.area_id}>

@@ -1,5 +1,5 @@
 import {
-  BarChart3, CreditCard, History, LayoutDashboard, MessageSquare, Package, Settings, ShoppingBag, Star, Store, Tags, Truck,
+  BarChart3, CreditCard, History, LayoutDashboard, LifeBuoy, MessageSquare, Package, Settings, ShoppingBag, Star, Store, Tags, Truck,
   Users, Wallet,
 } from 'lucide-react'
 import { Outlet } from 'react-router-dom'
@@ -10,6 +10,7 @@ import WorkArea, { useAreaSummary } from '../../components/WorkArea'
 const GROUPS = [
   ['Daily', [
     { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
+    { to: '/admin/support', label: 'Support', icon: LifeBuoy, count: (s) => (s.support?.needs_reply || 0) + (s.support?.store_answers || 0) },
     { to: '/admin/orders', label: 'Orders', icon: ShoppingBag },
     { to: '/admin/payments', label: 'Payments', icon: CreditCard, count: (s) => s.refunds_due },
     { to: '/admin/sellers', label: 'Sellers', icon: Store, count: (s) => s.sellers.pending },
